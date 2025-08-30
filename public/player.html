@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blood on the Clocktower - Player</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans flex flex-col min-h-screen items-center justify-center">
+    <div class="container mx-auto p-8 max-w-lg">
+        <div id="joinSection" class="bg-gray-800 p-8 rounded-lg shadow-xl border border-gray-700 space-y-6">
+            <h1 class="text-3xl font-bold text-center text-red-500">Join a Game</h1>
+            
+            <input type="text" id="playerNameInput" placeholder="Enter your name" class="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-red-500 transition-colors">
+            
+            <input type="text" id="gameCodeInput" placeholder="Enter game code" class="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-red-500 transition-colors">
+            
+            <button id="joinGameBtn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors">
+                Join Game
+            </button>
+        </div>
+
+        <div id="lobbySection" class="hidden bg-gray-800 p-8 rounded-lg shadow-xl border border-gray-700 space-y-6">
+            <h1 class="text-3xl font-bold text-center text-red-500">Game Lobby</h1>
+            <p id="lobbyGameCode" class="text-center text-xl font-mono text-gray-400"></p>
+            
+            <div id="playerListContainer" class="space-y-4">
+                <h2 class="text-2xl font-semibold text-gray-300">Players in Lobby:</h2>
+                <ul id="playerList" class="bg-gray-700 p-4 rounded-lg space-y-2">
+                    <!-- Player list will be populated here by JavaScript -->
+                </ul>
+            </div>
+            
+            <p id="roleDisplay" class="text-center hidden text-3xl font-bold text-green-400 animate-pulse">
+                Your role is: <span id="roleName"></span>
+            </p>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const socket = io();
+            const joinSection = document.getElementById('joinSection');
+            const lobbySection = document.getElementById('lobbySection');
+            const playerNameInput = document.getElementById('playerNameInput');
+            const gameCodeInput = document.getElementById('gameCodeInput');
+            const joinGameBtn = document.getElementById('joinGameBtn');
+            const lobbyGameCode = document.getElementById('lobbyGameCode');
+            const playerList = document.getElementById('playerList');
+            const roleDisplay = document.getElementById('roleDisplay');
+            const roleNameSpan = document.getElementById('roleName');
+
+            joinGameBtn.addEventListener('click', () => {
+                const playerName = playerNameInput.value.trim();
+                const gameCode = gameCodeInput.value.trim();
+
+                if (playerName && gameCode) {
+                    socket.emit('joinGame', { gameCode: gameCode, playerName: playerName });
+                    joinGameBtn.textContent = 'Joining...';
+                    joinGameBtn.disabled = true;
+                } else {
+                    alert('Please enter your name and a game code.');
+                }
+            });
+
+            socket.on('joinedGame', (data) => {
+                if (data.success) {
+                    joinSection.classList.add('hidden');
+                    lobbySection.classList.remove('hidden');
+                    lobbyGameCode.textContent = `Game Code: ${data.gameCode}`;
+                } else {
+                    alert('Failed to join game. Please try a different code.');
+                    joinGameBtn.textContent = 'Join Game';
+                    joinGameBtn.disabled = false;
+                }
+            });
+
+            socket.on('playerListUpdate', (players) => {
+                playerList.innerHTML = '';
+                players.forEach(player => {
+                    const li = document.createElement('li');
+                    li.textContent = player.name;
+                    li.className = 'text-gray-200 p-2 border-b border-gray-600 last:border-0';
+                    playerList.appendChild(li);
+                });
+            });
+
+            socket.on('gameStarted', () => {
+                console.log('Game has started!');
+                lobbySection.innerHTML = '<p class="text-center text-3xl font-bold text-green-400">Game Started! Please wait for your role to be revealed.</p>';
+            });
+
+            socket.on('roleAssigned', (role) => {
+                console.log('Your role has been assigned:', role);
+                roleNameSpan.textContent = role.name;
+                roleDisplay.classList.remove('hidden');
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blood on the Clocktower - Host</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans flex flex-col min-h-screen items-center justify-center">
+    <div class="container mx-auto p-8 max-w-lg">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-xl border border-gray-700 space-y-6">
+            <h1 class="text-3xl font-bold text-center text-red-500">Host Lobby</h1>
+            
+            <div id="game-code-display" class="bg-gray-700 p-4 rounded-lg text-center font-mono">
+                Game Code: <span id="gameCode" class="font-bold text-xl">Loading...</span>
+            </div>
+
+            <div class="space-y-4">
+                <button id="startGameBtn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors disabled:opacity-50" disabled>
+                    Start Game
+                </button>
+            </div>
+            
+            <div id="playerListContainer" class="space-y-4">
+                <h2 class="text-2xl font-semibold text-gray-300">Players in Lobby:</h2>
+                <ul id="playerList" class="bg-gray-700 p-4 rounded-lg space-y-2">
+                    <!-- Player list will be populated here by JavaScript -->
+                    <li class="text-gray-400">Waiting for players to join...</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const socket = io();
+            const gameCodeDisplay = document.getElementById('gameCode');
+            const startGameBtn = document.getElementById('startGameBtn');
+            const playerList = document.getElementById('playerList');
+            const playerListContainer = document.getElementById('playerListContainer');
+
+            let gameCode;
+
+            // Generate a random 4-digit game code
+            gameCode = Math.floor(1000 + Math.random() * 9000);
+            gameCodeDisplay.textContent = gameCode;
+
+            // This tells the server to create a game with this code
+            socket.emit('createGame', { gameCode: gameCode });
+
+            socket.on('playerListUpdate', (players) => {
+                playerList.innerHTML = ''; // Clear the current list
+                if (players.length === 0) {
+                    playerList.innerHTML = '<li class="text-gray-400">Waiting for players to join...</li>';
+                    startGameBtn.disabled = true;
+                } else {
+                    players.forEach(player => {
+                        const li = document.createElement('li');
+                        li.textContent = player.name;
+                        li.className = 'text-gray-200 p-2 border-b border-gray-600 last:border-0';
+                        playerList.appendChild(li);
+                    });
+                    startGameBtn.disabled = false;
+                }
+            });
+
+            startGameBtn.addEventListener('click', () => {
+                socket.emit('startGame', { gameCode: gameCode });
+                startGameBtn.textContent = 'Starting...';
+                startGameBtn.disabled = true;
+                playerListContainer.innerHTML = '<p class="text-center text-xl text-green-400">Game started! Players are receiving their roles.</p>';
+            });
+
+            socket.on('connect', () => {
+                console.log('Connected to server as host.');
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Disconnected from server.');
+                startGameBtn.disabled = true;
+                gameCodeDisplay.textContent = 'Disconnected';
+            });
+        });
+    </script>
+</body>
+</html>
