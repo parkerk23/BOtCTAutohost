@@ -5,28 +5,112 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Blood on the Clocktower - Host</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .player-circle {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+            word-wrap: break-word;
+            transition: all 0.3s ease;
+        }
+        .player-circle:hover {
+            transform: scale(1.1);
+            z-index: 10;
+        }
+        .game-map {
+            position: relative;
+            width: 500px;
+            height: 500px;
+            margin: 0 auto;
+        }
+        .center-timer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 5;
+        }
+        .control-buttons {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+        }
+    </style>
 </head>
-<body class="bg-gray-900 text-white font-sans flex flex-col min-h-screen items-center justify-center">
-    <div class="container mx-auto p-8 max-w-lg">
-        <div class="bg-gray-800 p-8 rounded-lg shadow-xl border border-gray-700 space-y-6">
-            <h1 class="text-3xl font-bold text-center text-red-500">Host Lobby</h1>
-            
-            <div id="game-code-display" class="bg-gray-700 p-4 rounded-lg text-center font-mono">
-                Game Code: <span id="gameCode" class="font-bold text-xl">Loading...</span>
-            </div>
+<body class="bg-gray-900 text-white font-sans min-h-screen">
+    <!-- Lobby View -->
+    <div id="lobbyView" class="flex flex-col min-h-screen items-center justify-center">
+        <div class="container mx-auto p-8 max-w-lg">
+            <div class="bg-gray-800 p-8 rounded-lg shadow-xl border border-gray-700 space-y-6">
+                <h1 class="text-3xl font-bold text-center text-red-500">Host Lobby</h1>
+                
+                <div id="game-code-display" class="bg-gray-700 p-4 rounded-lg text-center font-mono">
+                    Game Code: <span id="gameCode" class="font-bold text-xl">Generating...</span>
+                </div>
 
-            <div class="space-y-4">
-                <button id="startGameBtn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors disabled:opacity-50" disabled>
-                    Start Game
+                <div class="space-y-4">
+                    <button id="startGameBtn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        Start Game (Need 5+ players)
+                    </button>
+                </div>
+                
+                <div id="playerListContainer" class="space-y-4">
+                    <h2 class="text-2xl font-semibold text-gray-300">Players in Lobby:</h2>
+                    <ul id="playerList" class="bg-gray-700 p-4 rounded-lg space-y-2">
+                        <!-- Player list will be populated here by JavaScript -->
+                        <li class="text-gray-400">Waiting for players to join...</li>
+                    </ul>
+                </div>
+
+                <div id="gameStatus" class="hidden bg-green-800 p-4 rounded-lg text-center">
+                    <p class="text-green-200 font-semibold">Game in progress...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Map View -->
+    <div id="gameView" class="hidden min-h-screen relative bg-gray-900">
+        <!-- Control Buttons (Top Right) -->
+        <div class="control-buttons">
+            <div class="flex space-x-3">
+                <button id="nextPhaseBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors">
+                    Next Phase
+                </button>
+                <button id="endGameBtn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors">
+                    End Game
                 </button>
             </div>
-            
-            <div id="playerListContainer" class="space-y-4">
-                <h2 class="text-2xl font-semibold text-gray-300">Players in Lobby:</h2>
-                <ul id="playerList" class="bg-gray-700 p-4 rounded-lg space-y-2">
-                    <!-- Player list will be populated here by JavaScript -->
-                    <li class="text-gray-400">Waiting for players to join...</li>
-                </ul>
+        </div>
+
+        <!-- Game Title and Code -->
+        <div class="text-center pt-8">
+            <h1 class="text-4xl font-bold text-red-500 mb-2">Blood on the Clocktower</h1>
+            <p class="text-gray-400 font-mono">Game Code: <span id="gameMapCode"></span></p>
+        </div>
+
+        <!-- Player Circle Map -->
+        <div class="flex items-center justify-center min-h-screen">
+            <div class="game-map">
+                <!-- Players will be positioned around this circle -->
+                <div id="playersCircle"></div>
+                
+                <!-- Center Timer -->
+                <div class="center-timer">
+                    <div class="bg-gray-800 border-2 border-gray-600 rounded-full w-32 h-32 flex flex-col items-center justify-center">
+                        <div id="phaseDisplay" class="text-lg font-bold text-yellow-400 mb-1">Night</div>
+                        <div id="timerDisplay" class="text-2xl font-bold text-white">00:00</div>
+                        <div id="dayCounter" class="text-sm text-gray-400">Day 1</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -35,41 +119,202 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const socket = io();
+            
+            // Lobby elements
+            const lobbyView = document.getElementById('lobbyView');
+            const gameView = document.getElementById('gameView');
             const gameCodeDisplay = document.getElementById('gameCode');
+            const gameMapCode = document.getElementById('gameMapCode');
             const startGameBtn = document.getElementById('startGameBtn');
             const playerList = document.getElementById('playerList');
             const playerListContainer = document.getElementById('playerListContainer');
+            const gameStatus = document.getElementById('gameStatus');
+            
+            // Game elements
+            const playersCircle = document.getElementById('playersCircle');
+            const phaseDisplay = document.getElementById('phaseDisplay');
+            const timerDisplay = document.getElementById('timerDisplay');
+            const dayCounter = document.getElementById('dayCounter');
+            const nextPhaseBtn = document.getElementById('nextPhaseBtn');
+            const endGameBtn = document.getElementById('endGameBtn');
 
             let gameCode;
+            let gameStarted = false;
+            let currentPlayers = [];
+            let timerInterval;
+            let seconds = 0;
 
             // Generate a random 4-digit game code
             gameCode = Math.floor(1000 + Math.random() * 9000);
             gameCodeDisplay.textContent = gameCode;
+            gameMapCode.textContent = gameCode;
 
             // This tells the server to create a game with this code
             socket.emit('createGame', { gameCode: gameCode });
 
+            // Timer functions
+            function startTimer() {
+                seconds = 0;
+                timerInterval = setInterval(() => {
+                    seconds++;
+                    const mins = Math.floor(seconds / 60);
+                    const secs = seconds % 60;
+                    timerDisplay.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                }, 1000);
+            }
+
+            function stopTimer() {
+                if (timerInterval) {
+                    clearInterval(timerInterval);
+                }
+            }
+
+            // Position players in a circle
+            function positionPlayersInCircle(players) {
+                console.log('positionPlayersInCircle called with:', players);
+                playersCircle.innerHTML = ''; // Clear existing players
+                
+                if (!players || players.length === 0) {
+                    console.log('No players to position');
+                    return;
+                }
+                
+                const centerX = 250; // Center of the 500px container
+                const centerY = 250;
+                const radius = 180; // Distance from center
+                
+                players.forEach((player, index) => {
+                    console.log(`Positioning player ${index}: ${player.playerName}`);
+                    const angle = (index / players.length) * 2 * Math.PI - Math.PI / 2; // Start from top
+                    const x = centerX + radius * Math.cos(angle) - 40; // -40 to center the 80px wide circle
+                    const y = centerY + radius * Math.sin(angle) - 40; // -40 to center the 80px tall circle
+                    
+                    const playerElement = document.createElement('div');
+                    playerElement.className = 'player-circle bg-blue-600 border-2 border-blue-400 text-white';
+                    playerElement.style.left = `${x}px`;
+                    playerElement.style.top = `${y}px`;
+                    playerElement.textContent = player.playerName;
+                    playerElement.setAttribute('data-player-id', player.socketId);
+                    
+                    console.log(`Player ${player.playerName} positioned at (${x}, ${y})`);
+                    playersCircle.appendChild(playerElement);
+                });
+                
+                console.log(`Total players positioned: ${players.length}`);
+                console.log('playersCircle element:', playersCircle);
+                console.log('playersCircle children:', playersCircle.children.length);
+            }
+
+            socket.on('gameCreated', (data) => {
+                if (data.success) {
+                    console.log('Game created successfully');
+                } else {
+                    console.error('Failed to create game:', data.message);
+                    gameCodeDisplay.textContent = 'Error creating game';
+                }
+            });
+
             socket.on('playerListUpdate', (players) => {
-                playerList.innerHTML = ''; // Clear the current list
+                console.log('Host received player list update:', players);
+                
+                // Update lobby player list
+                playerList.innerHTML = '';
                 if (players.length === 0) {
                     playerList.innerHTML = '<li class="text-gray-400">Waiting for players to join...</li>';
                     startGameBtn.disabled = true;
+                    startGameBtn.textContent = 'Start Game (Need 5+ players)';
                 } else {
                     players.forEach(player => {
                         const li = document.createElement('li');
-                        li.textContent = player.name;
+                        li.textContent = player.playerName;
                         li.className = 'text-gray-200 p-2 border-b border-gray-600 last:border-0';
                         playerList.appendChild(li);
                     });
-                    startGameBtn.disabled = false;
+                    
+                    if (players.length >= 5 && !gameStarted) {
+                        startGameBtn.disabled = false;
+                        startGameBtn.textContent = `Start Game (${players.length} players)`;
+                    } else if (players.length < 5) {
+                        startGameBtn.disabled = true;
+                        startGameBtn.textContent = `Start Game (Need ${5 - players.length} more players)`;
+                    }
+                }
+                
+                // Update game map if game has started
+                if (gameStarted) {
+                    positionPlayersInCircle(players);
                 }
             });
 
             startGameBtn.addEventListener('click', () => {
-                socket.emit('startGame', { gameCode: gameCode });
-                startGameBtn.textContent = 'Starting...';
-                startGameBtn.disabled = true;
-                playerListContainer.innerHTML = '<p class="text-center text-xl text-green-400">Game started! Players are receiving their roles.</p>';
+                if (!gameStarted) {
+                    socket.emit('startGame', { gameCode: gameCode });
+                    startGameBtn.textContent = 'Starting...';
+                    startGameBtn.disabled = true;
+                    gameStarted = true;
+                }
+            });
+
+            socket.on('gameStarted', (data) => {
+                console.log('Game has started!');
+                console.log('Data received with gameStarted:', data);
+                
+                // Use players from the gameStarted event if available, otherwise use currentPlayers
+                const playersToPosition = data.players || currentPlayers;
+                console.log('Players to position:', playersToPosition);
+                
+                // Switch to game view
+                lobbyView.classList.add('hidden');
+                gameView.classList.remove('hidden');
+                
+                // Position players in circle
+                if (playersToPosition && playersToPosition.length > 0) {
+                    console.log('Positioning players in circle:', playersToPosition);
+                    positionPlayersInCircle(playersToPosition);
+                    // Update currentPlayers to the latest data
+                    currentPlayers = playersToPosition;
+                } else {
+                    console.log('No players to position - playersToPosition is empty');
+                }
+                
+                // Start timer
+                startTimer();
+                
+                gameStarted = true;
+            });
+
+            // Control button handlers
+            nextPhaseBtn.addEventListener('click', () => {
+                // TODO: Implement phase switching logic
+                const currentPhase = phaseDisplay.textContent;
+                if (currentPhase === 'Night') {
+                    phaseDisplay.textContent = 'Day';
+                    phaseDisplay.className = 'text-lg font-bold text-orange-400 mb-1';
+                } else {
+                    phaseDisplay.textContent = 'Night';
+                    phaseDisplay.className = 'text-lg font-bold text-blue-400 mb-1';
+                    const currentDay = parseInt(dayCounter.textContent.split(' ')[1]);
+                    dayCounter.textContent = `Day ${currentDay + 1}`;
+                }
+                stopTimer();
+                startTimer();
+            });
+
+            endGameBtn.addEventListener('click', () => {
+                if (confirm('Are you sure you want to end the game?')) {
+                    // TODO: Implement end game logic
+                    stopTimer();
+                    lobbyView.classList.remove('hidden');
+                    gameView.classList.add('hidden');
+                    gameStarted = false;
+                }
+            });
+
+            socket.on('startGameError', (data) => {
+                console.error('Start game error:', data.message);
+                startGameBtn.textContent = 'Error - Try Again';
+                startGameBtn.disabled = false;
+                gameStarted = false;
             });
 
             socket.on('connect', () => {
@@ -80,6 +325,8 @@
                 console.log('Disconnected from server.');
                 startGameBtn.disabled = true;
                 gameCodeDisplay.textContent = 'Disconnected';
+                gameStarted = false;
+                stopTimer();
             });
         });
     </script>

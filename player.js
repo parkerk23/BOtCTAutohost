@@ -7,6 +7,8 @@ class Player{
         this.isPoisoned = false;
         this.isAlive = true;
         this.canVote = true;
+        this.isProtected = false; 
+        this.isNominated = false;
     }
 
     playerDies() {

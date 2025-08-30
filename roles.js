@@ -77,10 +77,20 @@ const Roles = Object.freeze({
         roles: {
             SAINT: { 
                 name: 'Saint',
-                ability: 'If you are executed by the townsfolk, the townsfolk lose',
+                ability: 'If you die by execution your team loses',
                 nightOrder: 3
             },
-        }
+            RECLUSE: { 
+                name: 'Recluse',
+                ability: 'You might register as evil & as a minion or demon even if dead',
+                nightOrder: 3
+            },
+            SAINT: { 
+                name: 'Butler',
+                ability: 'Each night, choose a player (not yourself) you may only vote if they are voting too',
+                nightOrder: 3
+            }
+        },
     },
     DEMON: {
         name: 'Demon',
