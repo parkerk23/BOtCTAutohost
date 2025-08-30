@@ -351,7 +351,34 @@
                     currentPlayers = playersToPosition;
                 }
             });
+            
+            
+            socket.on('monk-ability', (playersAlive) => {
+                // Logic to display a list of players for the Monk to choose from
+                const selectElement = document.getElementById('monkProtectSelect');
+                selectElement.innerHTML = ''; // Clear previous options
+                
+                playersAlive.forEach(player => {
+                    if (player.role !== 'Monk') { // The Monk cannot protect themself
+                        const option = document.createElement('option');
+                        option.value = player.socketId;
+                        option.textContent = player.playerName;
+                        selectElement.appendChild(option);
+                    }
+                });
 
+                // Show the selection interface to the Monk
+                document.getElementById('monkAbilityDiv').style.display = 'block';
+
+                document.getElementById('monkProtectButton').addEventListener('click', () => {
+                    const protectedPlayerSocketId = selectElement.value;
+                    // Send a message to the server with the chosen player
+                    socket.emit('monk-protected-player', protectedPlayerSocketId);
+                    // Hide the interface after selection
+                    document.getElementById('monkAbilityDiv').style.display = 'none';
+                });
+            });
+            
             // Handle role assignment
             socket.on('roleAssigned', (role) => {
                 console.log('Your role has been assigned:', role);

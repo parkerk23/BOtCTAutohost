@@ -24,7 +24,14 @@ app.get('/', (req, res) => {
 // Socket.IO connection handling
 io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
-
+    
+    socket.on('monk-protected-player', (protectedPlayerSocketId) => {
+        // Find the game and handle the ability
+        const game = findGameByPlayerSocketId(socket.id); // You would need a function to find the game
+        if (game) {
+            game.monkProtects(socket.id, protectedPlayerSocketId);
+        }
+    });
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         

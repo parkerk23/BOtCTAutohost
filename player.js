@@ -9,6 +9,7 @@ class Player{
         this.canVote = true;
         this.isProtected = false; 
         this.isNominated = false;
+        this.slayerUsed = false;
     }
 
     playerDies() {
