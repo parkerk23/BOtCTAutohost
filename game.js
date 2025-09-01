@@ -1,18 +1,22 @@
 const { Player } = require('./player.js');
-const { Roles } = require('./roles'); // Corrected import from Teams to Roles
+const { Roles } = require('./roles');
 
 class Game {
-    constructor(gameCode) {
+    constructor(gameCode, io) {
         this.gameCode = gameCode;
+        this.io = io; 
         this.players = [];
         this.gamePhase = 'Lobby';
         this.townsfolkCount = 0;
         this.demonCount = 0;
         this.voteTally = {};
         this.dayCount = 0;
-        this.hostSocketId = null; // Track the host
+        this.hostSocketId = null;
         this.executionOccurred = false;
         this.pastExecutions = [];
+        this.nightActions = {}; // Store pending night actions
+        this.protectedPlayers = []; // Players protected this night
+        this.redHerring = null; // For Fortune Teller's false positive
     }
 
     addPlayer(socketId, playerName) {
@@ -105,6 +109,15 @@ class Game {
             player.role = availableRoles[index];
         });
 
+        // Set up Fortune Teller's red herring (good player who registers as evil)
+        const goodPlayers = this.players.filter(p => 
+            Object.values(Roles.TOWNSFOLK.roles).some(r => r.name === p.role.name) ||
+            Object.values(Roles.OUTSIDER.roles).some(r => r.name === p.role.name)
+        );
+        if (goodPlayers.length > 0) {
+            this.redHerring = goodPlayers[Math.floor(Math.random() * goodPlayers.length)];
+        }
+
         console.log("Roles assigned successfully!");
         this.players.forEach(player => {
             console.log(`${player.playerName} -> ${player.role.name}`);
@@ -125,8 +138,24 @@ class Game {
     NightPhase() {
         this.gamePhase = 'Night';
         this.dayCount++;
+        this.nightActions = {};
+        this.protectedPlayers = [];
+        
+        // Clear previous night's effects and reset voting
+        this.players.forEach(player => {
+            player.isProtected = false;
+            player.resetVoting(); // Reset voting for the new day
+            // Keep poison for one more phase (poison lasts through the night and next day)
+        });
+
         console.log(`Night ${this.dayCount} begins`);
-        this.executeNightActions();
+        
+        // First execute night actions, then notify clients
+        setTimeout(() => {
+            this.executeNightActions();
+        }, 1000); // Small delay to let clients update their UI
+        
+        this.io.to(this.gameCode).emit('nightPhaseStarted');
     }
 
     executeNightActions() {
@@ -134,36 +163,133 @@ class Game {
         const sortedRoles = allRoles.sort((a, b) => a.nightOrder - b.nightOrder);
 
         for (const role of sortedRoles) {
-            this.handleAbility(role);
+            const playersWithRole = this.players.filter(p => p.role.name === role.name && p.isAlive);
+            playersWithRole.forEach(player => {
+                this.handleAbility(role, player);
+            });
         }
     }
-    
-    monkProtects(monkSocketId, protectedPlayerSocketId) {
+
+    // Socket event handlers for player choices
+    handleMonkProtection(monkSocketId, protectedPlayerSocketId) {
         const protectedPlayer = this.players.find(p => p.socketId === protectedPlayerSocketId);
-        if (protectedPlayer) {
+        if (protectedPlayer && protectedPlayer.isAlive) {
             protectedPlayer.isProtected = true;
-            console.log(`Monk (${monkSocketId}) protected ${protectedPlayer.playerName}.`);
-            // You might need a way to track this protection for the rest of the night.
-            // For example, an array of protected players or a 'protected' property on the player object.
+            this.protectedPlayers.push(protectedPlayer);
+            console.log(`Monk protected ${protectedPlayer.playerName}.`);
+            this.io.to(monkSocketId).emit('actionConfirmed', `You protected ${protectedPlayer.playerName}.`);
         }
+    }
+
+    handleImpKill(impSocketId, targetSocketId) {
+        const imp = this.players.find(p => p.socketId === impSocketId);
+        const target = this.players.find(p => p.socketId === targetSocketId);
+        
+        if (!target || !target.isAlive) return;
+
+        // Check if Imp is killing themselves
+        if (targetSocketId === impSocketId) {
+            // Find a random alive minion to become the new Imp
+            const aliveMinions = this.players.filter(p => 
+                p.isAlive && 
+                Object.values(Roles.MINION.roles).some(r => r.name === p.role.name)
+            );
+            
+            if (aliveMinions.length > 0) {
+                const newImp = aliveMinions[Math.floor(Math.random() * aliveMinions.length)];
+                newImp.role = Roles.DEMON.roles.IMP;
+                this.io.to(newImp.socketId).emit('roleChanged', newImp.role);
+                console.log(`${newImp.playerName} becomes the new Imp!`);
+            }
+            
+            imp.playerDies();
+            this.io.to(this.gameCode).emit('playerDied', { player: imp, cause: 'suicide' });
+        } else {
+            // Normal kill attempt
+            if (target.isProtected || target.role.name === 'Soldier') {
+                console.log(`${target.playerName} was protected and survives the night.`);
+                this.io.to(impSocketId).emit('actionConfirmed', `Your attack was blocked!`);
+            } else {
+                target.playerDies();
+                console.log(`Imp killed ${target.playerName}`);
+                this.io.to(this.gameCode).emit('playerDied', { player: target, cause: 'demon' });
+            }
+        }
+    }
+
+    handlePoisonerPoison(poisonerSocketId, targetSocketId) {
+        const target = this.players.find(p => p.socketId === targetSocketId);
+        if (target && target.isAlive) {
+            target.isPoisoned = true;
+            console.log(`Poisoner poisoned ${target.playerName}.`);
+            this.io.to(poisonerSocketId).emit('actionConfirmed', `You poisoned ${target.playerName}.`);
+        }
+    }
+
+    handleSlayerKill(slayerSocketId, targetSocketId) {
+        const slayer = this.players.find(p => p.socketId === slayerSocketId);
+        const target = this.players.find(p => p.socketId === targetSocketId);
+        
+        if (!slayer || !target || slayer.slayerUsed || this.gamePhase !== 'Day') return;
+
+        slayer.slayerUsed = true;
+        
+        if (target.role.name === 'Imp') {
+            target.playerDies();
+            console.log(`Slayer executed the Imp: ${target.playerName}`);
+            this.io.to(this.gameCode).emit('playerDied', { player: target, cause: 'slayer' });
+            this.io.to(slayerSocketId).emit('actionConfirmed', `You successfully slayed the demon!`);
+        } else {
+            console.log(`Slayer failed to kill ${target.playerName} (not the demon)`);
+            this.io.to(slayerSocketId).emit('actionConfirmed', `Your target was not the demon.`);
+        }
+    }
+
+    handleFortuneTellerInvestigation(fortuneTellerSocketId, target1SocketId, target2SocketId) {
+        const target1 = this.players.find(p => p.socketId === target1SocketId);
+        const target2 = this.players.find(p => p.socketId === target2SocketId);
+        
+        if (!target1 || !target2) return;
+
+        const isTarget1Evil = this.isPlayerEvil(target1) || target1.socketId === this.redHerring?.socketId;
+        const isTarget2Evil = this.isPlayerEvil(target2) || target2.socketId === this.redHerring?.socketId;
+        
+        const result = isTarget1Evil || isTarget2Evil ? "YES" : "NO";
+        
+        this.io.to(fortuneTellerSocketId).emit('fortuneTellerResult', {
+            target1: target1.playerName,
+            target2: target2.playerName,
+            result: result
+        });
+        
+        console.log(`Fortune Teller learned: ${target1.playerName} and ${target2.playerName} - ${result}`);
+    }
+
+    handleButlerChoice(butlerSocketId, masterSocketId) {
+        const butler = this.players.find(p => p.socketId === butlerSocketId);
+        const master = this.players.find(p => p.socketId === masterSocketId);
+        
+        if (butler && master) {
+            butler.masterSocketId = masterSocketId;
+            console.log(`Butler aligned with ${master.playerName}`);
+            this.io.to(butlerSocketId).emit('actionConfirmed', `You aligned with ${master.playerName}.`);
+        }
+    }
+
+    isPlayerEvil(player) {
+        return player.role.name === 'Imp' || 
+               Object.values(Roles.MINION.roles).some(r => r.name === player.role.name);
     }
 
     findPlayersByRoleName(roleName) {
         return this.players.filter(p => p.role.name === roleName);
     }
 
-    handleAbility(role) {
-        console.log(`Executing ability for role: ${role.name}`);
-        const actingPlayer = this.players.find(p => p.role.name === role.name && p.isAlive);
-
-        if (!actingPlayer) {
-            console.log(`No active player found for role: ${role.name}`);
-            return;
-        }
+    handleAbility(role, actingPlayer) {
+        console.log(`Executing ability for role: ${role.name} (Player: ${actingPlayer.playerName})`);
 
         switch (role.name) {
             case 'Washerwoman':
-                console.log("It's the Washerwoman's turn.");
                 if (this.dayCount === 1) {
                     const allTownsfolkRoles = Object.values(Roles.TOWNSFOLK.roles);
                     const nonWasherwomanTownsfolk = allTownsfolkRoles.filter(role => role.name !== 'Washerwoman');
@@ -177,98 +303,110 @@ class Game {
                     let player1, player2;
                     if (playersWithHintedRole.length > 0) {
                         player1 = playersWithHintedRole[Math.floor(Math.random() * playersWithHintedRole.length)];
+                        // Get a random other player
+                        const otherPlayers = this.players.filter(p => 
+                            p.role.name !== 'Washerwoman' && 
+                            p.socketId !== player1.socketId
+                        );
+                        player2 = otherPlayers[Math.floor(Math.random() * otherPlayers.length)];
+                    } else {
+                        // No players with the hinted role, show two random players
+                        const otherPlayers = this.players.filter(p => p.role.name !== 'Washerwoman');
+                        const shuffled = otherPlayers.sort(() => 0.5 - Math.random());
+                        player1 = shuffled[0];
+                        player2 = shuffled[1];
                     }
-                    
-                    // Get all players that are not the Washerwoman or player1
-                    const otherPlayers = this.players.filter(p => p.role.name !== 'Washerwoman' && p.playerName !== player1.playerName);
-                    player2 = otherPlayers[Math.floor(Math.random() * otherPlayers.length)];
                     
                     // Shuffle the two players for the reveal
                     const revealedPlayers = [player1, player2].sort(() => 0.5 - Math.random());
                     
-                    // The Washerwoman learns one of the two revealed players is the hinted role
-                    console.log(`Washerwoman learns one of these two players is the ${hintedRole.name}: ${revealedPlayers[0].playerName}, ${revealedPlayers[1].playerName}`);
+                    this.io.to(actingPlayer.socketId).emit('washerwomanInfo', {
+                        role: hintedRole.name,
+                        players: [revealedPlayers[0].playerName, revealedPlayers[1].playerName]
+                    });
+                    
+                    console.log(`Washerwoman learns one of these players is the ${hintedRole.name}: ${revealedPlayers[0].playerName}, ${revealedPlayers[1].playerName}`);
                 }
                 break;
 
             case 'Monk':
-                console.log("It's the Monk's turn.");
                 if (this.gamePhase === 'Night' && this.dayCount > 1) {
-                    let protectedPlayer = getElementbyId('monkProtectSelect').value;
-                    protectedPlayer.isProtected = true;
-                    console.log(`Monk protects ${protectedPlayer.playerName} for the night.`);
+                    const otherAlivePlayers = this.players
+                        .filter(p => p.isAlive && p.socketId !== actingPlayer.socketId)
+                        .map(p => ({ socketId: p.socketId, playerName: p.playerName }));
+
+                    this.io.to(actingPlayer.socketId).emit('monkChoosePlayer', { players: otherAlivePlayers });
                 }
                 break;
+
             case 'Librarian':
-                console.log("It's the Librarian's turn.");
                 if (this.dayCount === 1) {
-                    // Get all outsider roles
-                    const allOutsiderRoles = Object.values(Roles.OUTSIDER.roles);
-                    const allOutsidersInGame = this.players.filter(p => p.role.name in allOutsiderRoles);
+                    const outsidersInGame = this.players.filter(p => 
+                        Object.values(Roles.OUTSIDER.roles).some(r => r.name === p.role.name)
+                    );
 
-                    if (allOutsidersInGame.length === 0) {
-                        console.log("Librarian learns there are no outsiders in play.");
+                    if (outsidersInGame.length === 0) {
+                        this.io.to(actingPlayer.socketId).emit('librarianInfo', {
+                            message: "There are no Outsiders in play."
+                        });
                     } else {
-                        // Find players with outsider roles
-                        const outsiderPlayer = allOutsidersInGame[Math.floor(Math.random() * allOutsidersInGame.length)];
-
-                        // Choose another player to pair them with
-                        const otherPlayers = this.players.filter(p => p.playerName !== outsiderPlayer.playerName && p.role.name !== 'Librarian');
+                        const outsiderPlayer = outsidersInGame[Math.floor(Math.random() * outsidersInGame.length)];
+                        const otherPlayers = this.players.filter(p => 
+                            p.socketId !== outsiderPlayer.socketId && 
+                            p.socketId !== actingPlayer.socketId
+                        );
                         const otherPlayer = otherPlayers[Math.floor(Math.random() * otherPlayers.length)];
 
                         const revealedPlayers = [outsiderPlayer, otherPlayer].sort(() => 0.5 - Math.random());
 
-                        console.log(`Librarian learns that one of these two players is an Outsider: ${revealedPlayers[0].playerName}, ${revealedPlayers[1].playerName}`);
+                        this.io.to(actingPlayer.socketId).emit('librarianInfo', {
+                            players: [revealedPlayers[0].playerName, revealedPlayers[1].playerName],
+                            message: "One of these players is an Outsider."
+                        });
                     }
                 }
                 break;
+
             case 'Ravenkeeper':
-                console.log("It's the Ravenkeeper's turn.");
-                if (this.playerDies() && this.gamePhase === 'Night') {
-                    let chosenPlayer = getElementbyId('ravenkeeperSelect').value;
-                    console.log(`Ravenkeeper chooses ${chosenPlayer.playerName}. If they die, Ravenkeeper learns their role.`);
-                }
+                // This is handled when the player dies, not during normal night phase
                 break;
+
             case 'Investigator':
-                console.log("It's the Investigator's turn.");
                 if (this.dayCount === 1) {
-                    // Get all minion roles
-                    const allMinionRoles = Object.values(Roles.MINION.roles);
-                    const minionsInGame = this.players.filter(p => p.role.name in allMinionRoles);
-                    
-                    // You would then implement a similar logic to the Washerwoman to reveal one minion.
-                    // It should pick one minion and one other player, and reveal them.
-                    let player1, player2;
+                    const minionsInGame = this.players.filter(p => 
+                        Object.values(Roles.MINION.roles).some(r => r.name === p.role.name)
+                    );
+
                     if (minionsInGame.length > 0) {
-                        player1 = minionsInGame[Math.floor(Math.random() * minionsInGame.length)];
+                        const minionPlayer = minionsInGame[Math.floor(Math.random() * minionsInGame.length)];
+                        const nonMinionPlayers = this.players.filter(p => 
+                            !minionsInGame.some(m => m.socketId === p.socketId) && 
+                            p.socketId !== actingPlayer.socketId
+                        );
+                        const otherPlayer = nonMinionPlayers[Math.floor(Math.random() * nonMinionPlayers.length)];
+
+                        const revealedPlayers = [minionPlayer, otherPlayer].sort(() => 0.5 - Math.random());
+                        
+                        this.io.to(actingPlayer.socketId).emit('investigatorInfo', {
+                            players: [revealedPlayers[0].playerName, revealedPlayers[1].playerName],
+                            message: "One of these players is a Minion."
+                        });
+                    } else {
+                        this.io.to(actingPlayer.socketId).emit('investigatorInfo', {
+                            message: "There are no Minions in play."
+                        });
                     }
-                    
-                    // Get all players that are not the Washerwoman or player1
-                    const otherPlayers = this.players.filter(p => p.playerName !== player1.playerName);
-                    player2 = otherPlayers[Math.floor(Math.random() * otherPlayers.length)];
-                    
-                    // Shuffle the two players for the reveal
-                    const revealedPlayers = [player1, player2].sort(() => 0.5 - Math.random());
-                    
-                    // The Washerwoman learns one of the two revealed players is the hinted role
-                    console.log(`Washerwoman learns one of these two players is the ${hintedRole.name}: ${revealedPlayers[0].playerName}, ${revealedPlayers[1].playerName}`);
                 }
                 break;
-            case 'Virgin':
-                console.log("It's the Virgin's turn.");
-                if (this.playerNominated) { 
-                    this.playerDies();
-                }
-                break;
-                case 'Chef':
-                    console.log("It's the Chef's turn.");
+
+            case 'Chef':
+                if (this.dayCount === 1) {
                     let pairCount = 0;
                     const evilRoles = ['Imp', 'Poisoner', 'Spy', 'Baron', 'Scarlet Woman'];
                     
-                    // Iterate through all players to check for adjacent evil pairs
                     for (let i = 0; i < this.players.length; i++) {
                         const currentPlayerRole = this.players[i].role.name;
-                        const nextPlayerIndex = (i + 1) % this.players.length; // Use the modulo operator for a circular list
+                        const nextPlayerIndex = (i + 1) % this.players.length;
                         const nextPlayerRole = this.players[nextPlayerIndex].role.name;
                         
                         if (evilRoles.includes(currentPlayerRole) && evilRoles.includes(nextPlayerRole)) {
@@ -276,144 +414,219 @@ class Game {
                         }
                     }
                     
-                    // Now you would send the count to the Chef via a socket.
+                    this.io.to(actingPlayer.socketId).emit('chefInfo', {
+                        pairCount: pairCount,
+                        message: `There are ${pairCount} pairs of adjacent evil players.`
+                    });
+                    
                     console.log(`Chef learns there are ${pairCount} pairs of evil players.`);
-                    break;
-            case 'Slayer':
-                console.log("It's the Slayer's turn.");
-                if (this.gamePhase === 'Day' && this.slayerUsed === false) {
-                    let chosenPlayer = getElementbyId('slayerSelect').value;
-                    if (chosenPlayer.role.name === 'Imp') {
-                        chosenPlayer.playerDies();
-                        console.log(`Slayer has executed the Imp: ${chosenPlayer.playerName}`);
-                    }
                 }
                 break;
-            case 'Soldier':
-                console.log("It's the Soldier's turn.");
-                this.isProtected = true;
-                break;
-            case 'Mayor':
-                console.log("It's the Mayor's turn.");
-                if (this.playerDies() && this.gamePhase === 'Night') {
-                    let replacementPlayer = this.findPlayersByRoleName(TOWNSFOLK).find(p => p.isAlive && p.playerName !== actingPlayer.playerName);
-                    replacementPlayer.playerDies();
-                    console.log(`Mayor has died, ${replacementPlayer.playerName} dies instead.`);
-                }
-                if (this.players.filter(p => p.isAlive).length === 3 && !this.executionOccurred) {
-                    this.endGame('Good wins - Mayor condition met');
-                }
-                break;
+
             case 'Empath':
-                console.log("It's the Empath's turn.");
                 if (this.gamePhase === 'Night') {
                     const playerIndex = this.players.indexOf(actingPlayer);
-                    const i = 1;
-                    if(this.players[(playerIndex - i + this.players.length) % this.players.length].isAlive || this.players[(playerIndex + 1) % this.players.length].isAlive){
-                        i += 1;
-                        const leftNeighbor = this.players[(playerIndex - i + this.players.length) % this.players.length];
-                        const rightNeighbor = this.players[(playerIndex + 1) % this.players.length];
+                    let leftNeighbor, rightNeighbor;
+                    
+                    // Find alive neighbors
+                    for (let i = 1; i < this.players.length; i++) {
+                        const leftIndex = (playerIndex - i + this.players.length) % this.players.length;
+                        const rightIndex = (playerIndex + i) % this.players.length;
+                        
+                        if (!leftNeighbor && this.players[leftIndex].isAlive) {
+                            leftNeighbor = this.players[leftIndex];
+                        }
+                        if (!rightNeighbor && this.players[rightIndex].isAlive) {
+                            rightNeighbor = this.players[rightIndex];
+                        }
+                        
+                        if (leftNeighbor && rightNeighbor) break;
                     }
-                    const evilNeighbors = [leftNeighbor, rightNeighbor].filter(p => p.isAlive && 
-                        (p.role.name === 'Imp' || Object.values(Roles.MINION.roles).some(r => r.name === p.role.name)));
-                    console.log(`Empath learns that ${evilNeighbors.length} of their neighbors are evil.`);
+                    
+                    let evilCount = 0;
+                    if (leftNeighbor && this.isPlayerEvil(leftNeighbor)) evilCount++;
+                    if (rightNeighbor && this.isPlayerEvil(rightNeighbor)) evilCount++;
+                    
+                    this.io.to(actingPlayer.socketId).emit('empathInfo', {
+                        evilCount: evilCount,
+                        leftNeighbor: leftNeighbor?.playerName || 'None',
+                        rightNeighbor: rightNeighbor?.playerName || 'None'
+                    });
+                    
+                    console.log(`Empath learns that ${evilCount} of their neighbors are evil.`);
                 }
                 break;
+
             case 'Fortune Teller':
-                //ADD FUNCTIONALITY FOR ONE GOOD PLAYER THAT REGISTERS AS EVIL
-                console.log("It's the Fortune Teller's turn.");
                 if (this.gamePhase === 'Night') {
-                    let chosenPlayer1 = getElementbyId('fortuneTellerSelect').value;
-                    let chosenPlayer2 = getElementbyId('fortuneTellerSelect2').value;
-                    const evilRoles = ['Imp', 'Poisoner', 'Spy', 'Baron', 'Scarlet Woman'];
-                    const isEvil1 = evilRoles.includes(chosenPlayer1.role.name);
-                    const isEvil2 = evilRoles.includes(chosenPlayer2.role.name);
-                    console.log(`Fortune Teller learns: ${chosenPlayer1.playerName} is ${isEvil1 ? 'Evil' : 'Not Evil'}, ${chosenPlayer2.playerName} is ${isEvil2 ? 'Evil' : 'Not Evil'}`);
+                    const otherAlivePlayers = this.players
+                        .filter(p => p.isAlive && p.socketId !== actingPlayer.socketId)
+                        .map(p => ({ socketId: p.socketId, playerName: p.playerName }));
+
+                    this.io.to(actingPlayer.socketId).emit('fortuneTellerChoosePlayers', { 
+                        players: otherAlivePlayers 
+                    });
                 }
                 break;
+
             case 'Undertaker':
-                console.log("It's the Undertaker's turn.");
                 if (this.gamePhase === 'Night' && this.dayCount > 1) {
                     const executedToday = this.pastExecutions[this.pastExecutions.length - 1];
                     if (executedToday) {
-                        console.log(`Undertaker learns that ${executedToday.playerName} was executed today and their role was ${executedToday.role.name}.`);
+                        this.io.to(actingPlayer.socketId).emit('undertakerInfo', {
+                            executedPlayer: executedToday.playerName,
+                            role: executedToday.role.name
+                        });
                     } else {
-                        console.log("No execution occurred today, Undertaker learns nothing.");
+                        this.io.to(actingPlayer.socketId).emit('undertakerInfo', {
+                            message: "No execution occurred today."
+                        });
                     }
                 }
                 break;
-            case 'Saint':
-                console.log("It's the Saint's turn.");
-                if (this.playerDies() && this.gamePhase === 'Day') {
-                    this.endGame('Evil wins - Saint executed');
-                }
-                break;
-            case 'Recluse':
-                //ADD CALLED ON FUNCTIONALITY
-                console.log("It's the Recluse's turn.");
-                let randomTeam = Math.random() < 0.5 ? 'Minion' : 'Demon';
-                console.log(`Recluse registers as ${randomTeam} to any investigative roles.`);
-                break;
+
             case 'Butler':
-                console.log("It's the Butler's turn.");
                 if (this.gamePhase === 'Night') {
-                    let chosenPlayer = getElementbyId('butlerSelect').value;
-                    console.log(`Butler chooses to align with ${chosenPlayer.playerName}. They can only vote if that player votes.`);
+                    const otherAlivePlayers = this.players
+                        .filter(p => p.isAlive && p.socketId !== actingPlayer.socketId)
+                        .map(p => ({ socketId: p.socketId, playerName: p.playerName }));
+
+                    this.io.to(actingPlayer.socketId).emit('butlerChoosePlayer', { 
+                        players: otherAlivePlayers 
+                    });
                 }
                 break;
+
             case 'Imp':
-                console.log("It's the Imp's turn.");
                 if (this.gamePhase === 'Night') {
-                    let chosenPlayer = getElementbyId('impSelect').value;
-                    if (chosenPlayer.socketId === actingPlayer.socketId) {
-                        this.getRandomRoleFromTeam(Roles.MINION.roles);
-                        console.log(`Imp has killed themselves. A minion becomes the new Imp.`);
-                    }
-                    if (!chosenPlayer.isProtected) {
-                        chosenPlayer.playerDies();
-                        console.log(`Imp has killed ${chosenPlayer.playerName}`);
-                    } else {
-                        console.log(`${chosenPlayer.playerName} was protected and survives the night.`);
-                    }
+                    const allAlivePlayers = this.players
+                        .filter(p => p.isAlive)
+                        .map(p => ({ socketId: p.socketId, playerName: p.playerName }));
+
+                    this.io.to(actingPlayer.socketId).emit('impChooseTarget', { 
+                        players: allAlivePlayers 
+                    });
                 }
                 break;
+
             case 'Poisoner':
-                console.log("It's the Poisoner's turn.");
                 if (this.gamePhase === 'Night') {
-                    let chosenPlayer = getElementbyId('poisonerSelect').value;
-                    chosenPlayer.isPoisoned = true;
-                    console.log(`Poisoner has poisoned ${chosenPlayer.playerName}. They will be poisoned tonight and tomorrow.`);
+                    const otherAlivePlayers = this.players
+                        .filter(p => p.isAlive && p.socketId !== actingPlayer.socketId)
+                        .map(p => ({ socketId: p.socketId, playerName: p.playerName }));
+
+                    this.io.to(actingPlayer.socketId).emit('poisonerChooseTarget', { 
+                        players: otherAlivePlayers 
+                    });
                 }
                 break;
+
             case 'Spy':
-                // ADD ROLES UNDER NAMES IN PLAYER HTML AS GRIMOIRE
-                console.log("It's the Spy's turn.");
                 if (this.gamePhase === 'Night') {
+                    const grimoire = this.players.map(p => ({
+                        playerName: p.playerName,
+                        role: p.role.name,
+                        isAlive: p.isAlive,
+                        isPoisoned: p.isPoisoned
+                    }));
+                    
+                    this.io.to(actingPlayer.socketId).emit('spyGrimoire', { grimoire });
                     console.log("Spy views the grimoire and learns all roles in play.");
                 }
                 break;
-            case 'Baron':
-                console.log("It's the Baron's turn.");
-                break;
+
             case 'Scarlet Woman':
-                console.log("It's the Scarlet Woman's turn.");
                 if (this.gamePhase === 'Night' && this.players.filter(p => p.isAlive).length >= 5) {
-                    if (this.players.find(p => p.role.name === 'Imp' && p.isAlive === false) === undefined) {
-                        this.player.role = Roles.DEMON.roles.IMP;
-                        console.log(`Scarlet Woman becomes the new Imp!`);
+                    const impPlayer = this.players.find(p => p.role.name === 'Imp');
+                    if (impPlayer && !impPlayer.isAlive) {
+                        actingPlayer.role = Roles.DEMON.roles.IMP;
+                        this.io.to(actingPlayer.socketId).emit('roleChanged', actingPlayer.role);
+                        console.log(`${actingPlayer.playerName} becomes the new Imp!`);
                     }
                 }
                 break;
+
+            // Passive abilities that don't need night actions
+            case 'Virgin':
+            case 'Soldier':
+            case 'Mayor':
+            case 'Saint':
+            case 'Recluse':
+            case 'Baron':
+                // These are handled elsewhere or are passive
+                break;
+
             default:
                 console.log(`No ability logic found for role: ${role.name}`);
                 break;
         }
     }
 
+    // Handle special death triggers
+    handlePlayerDeath(player, cause) {
+        // Ravenkeeper ability
+        if (player.role.name === 'Ravenkeeper' && cause === 'night') {
+            const otherAlivePlayers = this.players
+                .filter(p => p.isAlive && p.socketId !== player.socketId)
+                .map(p => ({ socketId: p.socketId, playerName: p.playerName }));
+
+            this.io.to(player.socketId).emit('ravenkeeperChooseTarget', { 
+                players: otherAlivePlayers 
+            });
+        }
+
+        // Mayor ability
+        if (player.role.name === 'Mayor' && cause === 'night') {
+            const aliveTownsfolk = this.players.filter(p => 
+                p.isAlive && 
+                Object.values(Roles.TOWNSFOLK.roles).some(r => r.name === p.role.name) &&
+                p.socketId !== player.socketId
+            );
+            
+            if (aliveTownsfolk.length > 0) {
+                const replacement = aliveTownsfolk[Math.floor(Math.random() * aliveTownsfolk.length)];
+                replacement.playerDies();
+                console.log(`Mayor died, ${replacement.playerName} dies instead.`);
+                this.io.to(this.gameCode).emit('playerDied', { 
+                    player: replacement, 
+                    cause: 'mayor_replacement' 
+                });
+            }
+        }
+
+        // Saint ability
+        if (player.role.name === 'Saint' && cause === 'execution') {
+            this.endGame('Evil wins - Saint executed');
+        }
+
+        // Virgin ability (handled during nomination phase)
+        // Check win conditions after death
+        const winCondition = this.checkWinCondition();
+        if (winCondition) {
+            this.endGame(winCondition);
+        }
+    }
+
     dayPhase() {
         this.gamePhase = 'Day';
+        this.executionOccurred = false;
+        
+        // Clear poison from previous day (poison lasts through night and day)
+        this.players.forEach(player => {
+            if (player.isPoisoned && this.dayCount > 1) {
+                player.isPoisoned = false;
+            }
+        });
+        
+        // Check Mayor win condition
+        const mayorPlayer = this.players.find(p => p.role.name === 'Mayor' && p.isAlive);
+        if (mayorPlayer && this.players.filter(p => p.isAlive).length === 3 && !this.executionOccurred) {
+            this.endGame('Good wins - Mayor condition met');
+            return;
+        }
+        
         console.log(`Day ${this.dayCount} begins`);
-        // Logic for the day phase (discussion, voting)
+        this.io.to(this.gameCode).emit('dayPhaseStarted');
     }
 
     handleVote(voterSocketId, targetSocketId) {
@@ -424,21 +637,27 @@ class Game {
             return false;
         }
         
+        // Butler restriction
+        if (voter.role.name === 'Butler' && voter.masterSocketId) {
+            const master = this.players.find(p => p.socketId === voter.masterSocketId);
+            if (master && !master.hasVoted) {
+                return false; // Butler can't vote unless master has voted
+            }
+        }
+        
         if (!this.voteTally[targetSocketId]) {
             this.voteTally[targetSocketId] = 0;
         }
         
         this.voteTally[targetSocketId]++;
         voter.playerVotes();
+        voter.hasVoted = true;
         return true;
     }
 
     checkWinCondition() {
-        const aliveEvil = this.players.filter(p => p.isAlive && (p.role.name === 'Imp' || 
-            Object.values(Roles.MINION.roles).some(r => r.name === p.role.name))).length;
-        const aliveGood = this.players.filter(p => p.isAlive && 
-            (Object.values(Roles.TOWNSFOLK.roles).some(r => r.name === p.role.name) ||
-             Object.values(Roles.OUTSIDER.roles).some(r => r.name === p.role.name))).length;
+        const aliveEvil = this.players.filter(p => p.isAlive && this.isPlayerEvil(p)).length;
+        const aliveGood = this.players.filter(p => p.isAlive && !this.isPlayerEvil(p)).length;
 
         if (aliveEvil === 0) {
             return 'Good wins - Demon eliminated';
@@ -452,7 +671,8 @@ class Game {
     endGame(winCondition) {
         this.gamePhase = 'Ended';
         console.log(`Game ended: ${winCondition}`);
-        // Logic for checking win conditions and ending the game
+        this.io.to(this.gameCode).emit('gameEnded', { winCondition });
+        this.io.to(this.hostSocketId).emit('gameEnded', { winCondition });
     }
 }
 

@@ -70,7 +70,6 @@ const Roles = Object.freeze({
             },
         },
     },
-    // ADD THE OTHER OUTSIDERS HERE VVVVVVVVVVVVV
     OUTSIDER: {
         name: 'Outsider',
         description: 'You win if the townsfolk win',
@@ -85,7 +84,7 @@ const Roles = Object.freeze({
                 ability: 'You might register as evil & as a minion or demon even if dead',
                 nightOrder: 3
             },
-            SAINT: { 
+            BUTLER: { 
                 name: 'Butler',
                 ability: 'Each night, choose a player (not yourself) you may only vote if they are voting too',
                 nightOrder: 3
@@ -131,4 +130,4 @@ const Roles = Object.freeze({
     },
 });
 
-module.exports = { Roles }; 
+module.exports = { Roles };

@@ -24,6 +24,11 @@
             transform: scale(1.1);
             z-index: 10;
         }
+        .player-circle.dead {
+            opacity: 0.5;
+            background-color: #ef4444 !important;
+            border-color: #dc2626 !important;
+        }
         .game-map {
             position: relative;
             width: 500px;
@@ -42,6 +47,14 @@
             top: 20px;
             right: 20px;
             z-index: 10;
+        }
+        .game-log {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            max-height: 400px;
+            overflow-y: auto;
         }
     </style>
 </head>
@@ -65,7 +78,6 @@
                 <div id="playerListContainer" class="space-y-4">
                     <h2 class="text-2xl font-semibold text-gray-300">Players in Lobby:</h2>
                     <ul id="playerList" class="bg-gray-700 p-4 rounded-lg space-y-2">
-                        <!-- Player list will be populated here by JavaScript -->
                         <li class="text-gray-400">Waiting for players to join...</li>
                     </ul>
                 </div>
@@ -79,6 +91,16 @@
 
     <!-- Game Map View -->
     <div id="gameView" class="hidden min-h-screen relative bg-gray-900">
+        <!-- Game Log (Top Left) -->
+        <div class="game-log">
+            <div class="bg-gray-800 p-4 rounded-lg border border-gray-600 max-w-xs">
+                <h3 class="text-lg font-bold text-yellow-400 mb-2">Game Log</h3>
+                <div id="gameLogContent" class="text-sm text-gray-200 space-y-1">
+                    <div>Game started</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Control Buttons (Top Right) -->
         <div class="control-buttons">
             <div class="flex space-x-3">
@@ -95,6 +117,9 @@
         <div class="text-center pt-8">
             <h1 class="text-4xl font-bold text-red-500 mb-2">Blood on the Clocktower</h1>
             <p class="text-gray-400 font-mono">Game Code: <span id="gameMapCode"></span></p>
+            <div id="phaseInfo" class="mt-4 text-xl text-yellow-400">
+                <span id="currentPhase">Night</span> <span id="currentDay">1</span>
+            </div>
         </div>
 
         <!-- Player Circle Map -->
@@ -106,7 +131,7 @@
                 <!-- Center Timer -->
                 <div class="center-timer">
                     <div class="bg-gray-800 border-2 border-gray-600 rounded-full w-32 h-32 flex flex-col items-center justify-center">
-                        <div id="phaseDisplay" class="text-lg font-bold text-yellow-400 mb-1">Night</div>
+                        <div id="phaseDisplay" class="text-lg font-bold text-blue-400 mb-1">Night</div>
                         <div id="timerDisplay" class="text-2xl font-bold text-white">00:00</div>
                         <div id="dayCounter" class="text-sm text-gray-400">Day 1</div>
                     </div>
@@ -133,10 +158,13 @@
             // Game elements
             const playersCircle = document.getElementById('playersCircle');
             const phaseDisplay = document.getElementById('phaseDisplay');
+            const currentPhase = document.getElementById('currentPhase');
+            const currentDay = document.getElementById('currentDay');
             const timerDisplay = document.getElementById('timerDisplay');
             const dayCounter = document.getElementById('dayCounter');
             const nextPhaseBtn = document.getElementById('nextPhaseBtn');
             const endGameBtn = document.getElementById('endGameBtn');
+            const gameLogContent = document.getElementById('gameLogContent');
 
             let gameCode;
             let gameStarted = false;
@@ -151,6 +179,15 @@
 
             // This tells the server to create a game with this code
             socket.emit('createGame', { gameCode: gameCode });
+
+            // Add to game log
+            function addToGameLog(message) {
+                const logEntry = document.createElement('div');
+                logEntry.textContent = message;
+                logEntry.className = 'text-gray-200 text-sm';
+                gameLogContent.appendChild(logEntry);
+                gameLogContent.scrollTop = gameLogContent.scrollHeight;
+            }
 
             // Timer functions
             function startTimer() {
@@ -172,42 +209,45 @@
             // Position players in a circle
             function positionPlayersInCircle(players) {
                 console.log('positionPlayersInCircle called with:', players);
-                playersCircle.innerHTML = ''; // Clear existing players
+                playersCircle.innerHTML = '';
                 
                 if (!players || players.length === 0) {
                     console.log('No players to position');
                     return;
                 }
                 
-                const centerX = 250; // Center of the 500px container
+                const centerX = 250;
                 const centerY = 250;
-                const radius = 180; // Distance from center
+                const radius = 180;
                 
                 players.forEach((player, index) => {
                     console.log(`Positioning player ${index}: ${player.playerName}`);
-                    const angle = (index / players.length) * 2 * Math.PI - Math.PI / 2; // Start from top
-                    const x = centerX + radius * Math.cos(angle) - 40; // -40 to center the 80px wide circle
-                    const y = centerY + radius * Math.sin(angle) - 40; // -40 to center the 80px tall circle
+                    const angle = (index / players.length) * 2 * Math.PI - Math.PI / 2;
+                    const x = centerX + radius * Math.cos(angle) - 40;
+                    const y = centerY + radius * Math.sin(angle) - 40;
                     
                     const playerElement = document.createElement('div');
-                    playerElement.className = 'player-circle bg-blue-600 border-2 border-blue-400 text-white';
+                    playerElement.className = `player-circle ${player.isAlive === false ? 'dead' : ''} bg-blue-600 border-2 border-blue-400 text-white`;
                     playerElement.style.left = `${x}px`;
                     playerElement.style.top = `${y}px`;
                     playerElement.textContent = player.playerName;
                     playerElement.setAttribute('data-player-id', player.socketId);
+                    
+                    // Add role tooltip for host
+                    playerElement.title = `${player.playerName} - ${player.role?.name || 'No role'}`;
                     
                     console.log(`Player ${player.playerName} positioned at (${x}, ${y})`);
                     playersCircle.appendChild(playerElement);
                 });
                 
                 console.log(`Total players positioned: ${players.length}`);
-                console.log('playersCircle element:', playersCircle);
-                console.log('playersCircle children:', playersCircle.children.length);
             }
 
+            // Socket event handlers
             socket.on('gameCreated', (data) => {
                 if (data.success) {
                     console.log('Game created successfully');
+                    addToGameLog(`Game created with code ${gameCode}`);
                 } else {
                     console.error('Failed to create game:', data.message);
                     gameCodeDisplay.textContent = 'Error creating game';
@@ -216,6 +256,7 @@
 
             socket.on('playerListUpdate', (players) => {
                 console.log('Host received player list update:', players);
+                currentPlayers = players;
                 
                 // Update lobby player list
                 playerList.innerHTML = '';
@@ -246,20 +287,10 @@
                 }
             });
 
-            startGameBtn.addEventListener('click', () => {
-                if (!gameStarted) {
-                    socket.emit('startGame', { gameCode: gameCode });
-                    startGameBtn.textContent = 'Starting...';
-                    startGameBtn.disabled = true;
-                    gameStarted = true;
-                }
-            });
-
             socket.on('gameStarted', (data) => {
                 console.log('Game has started!');
                 console.log('Data received with gameStarted:', data);
                 
-                // Use players from the gameStarted event if available, otherwise use currentPlayers
                 const playersToPosition = data.players || currentPlayers;
                 console.log('Players to position:', playersToPosition);
                 
@@ -271,7 +302,6 @@
                 if (playersToPosition && playersToPosition.length > 0) {
                     console.log('Positioning players in circle:', playersToPosition);
                     positionPlayersInCircle(playersToPosition);
-                    // Update currentPlayers to the latest data
                     currentPlayers = playersToPosition;
                 } else {
                     console.log('No players to position - playersToPosition is empty');
@@ -281,32 +311,69 @@
                 startTimer();
                 
                 gameStarted = true;
+                addToGameLog(`Game started with ${playersToPosition.length} players`);
+                addToGameLog('Night 1 begins');
             });
 
-            // Control button handlers
-            nextPhaseBtn.addEventListener('click', () => {
-                // TODO: Implement phase switching logic
-                const currentPhase = phaseDisplay.textContent;
-                if (currentPhase === 'Night') {
-                    phaseDisplay.textContent = 'Day';
-                    phaseDisplay.className = 'text-lg font-bold text-orange-400 mb-1';
-                } else {
-                    phaseDisplay.textContent = 'Night';
+            socket.on('phaseChanged', (data) => {
+                console.log('Phase changed to:', data);
+                
+                phaseDisplay.textContent = data.phase;
+                currentPhase.textContent = data.phase;
+                currentDay.textContent = data.dayCount;
+                dayCounter.textContent = `Day ${data.dayCount}`;
+                
+                // Update phase styling
+                if (data.phase === 'Night') {
                     phaseDisplay.className = 'text-lg font-bold text-blue-400 mb-1';
-                    const currentDay = parseInt(dayCounter.textContent.split(' ')[1]);
-                    dayCounter.textContent = `Day ${currentDay + 1}`;
+                    addToGameLog(`Night ${data.dayCount} begins`);
+                } else {
+                    phaseDisplay.className = 'text-lg font-bold text-orange-400 mb-1';
+                    addToGameLog(`Day ${data.dayCount} begins`);
                 }
+                
+                // Restart timer
                 stopTimer();
                 startTimer();
             });
 
+            socket.on('playerDied', (data) => {
+                addToGameLog(`${data.player.playerName} has died (${data.cause})`);
+                // Update the visual representation
+                const playerElement = document.querySelector(`[data-player-id="${data.player.socketId}"]`);
+                if (playerElement) {
+                    playerElement.classList.add('dead');
+                }
+            });
+
+            socket.on('gameEnded', (data) => {
+                addToGameLog(`Game ended: ${data.winCondition}`);
+                stopTimer();
+                alert(`Game Over: ${data.winCondition}`);
+            });
+
+            // Control button handlers
+            nextPhaseBtn.addEventListener('click', () => {
+                socket.emit('nextPhase');
+                addToGameLog('Host triggered phase change');
+            });
+
             endGameBtn.addEventListener('click', () => {
                 if (confirm('Are you sure you want to end the game?')) {
-                    // TODO: Implement end game logic
                     stopTimer();
                     lobbyView.classList.remove('hidden');
                     gameView.classList.add('hidden');
                     gameStarted = false;
+                    addToGameLog('Game ended by host');
+                }
+            });
+
+            startGameBtn.addEventListener('click', () => {
+                if (!gameStarted) {
+                    socket.emit('startGame', { gameCode: gameCode });
+                    startGameBtn.textContent = 'Starting...';
+                    startGameBtn.disabled = true;
+                    gameStarted = true;
                 }
             });
 

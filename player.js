@@ -10,6 +10,10 @@ class Player{
         this.isProtected = false; 
         this.isNominated = false;
         this.slayerUsed = false;
+        this.hasVoted = false;
+        this.virginTriggered = false;
+        this.masterSocketId = null; // For Butler
+        this.ravenkeeperTarget = null; // For Ravenkeeper
     }
 
     playerDies() {
@@ -19,8 +23,14 @@ class Player{
 
     playerVotes() { 
         if (this.isAlive && this.canVote) { 
-            this.canVote = false
+            this.canVote = false;
+            this.hasVoted = true;
         }
+    }
+
+    resetVoting() {
+        this.canVote = true;
+        this.hasVoted = false;
     }
 }
 
