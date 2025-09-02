@@ -1,3 +1,4 @@
+<!-- Enhanced host.html with voting controls, execution management, and admin tools -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -19,6 +20,7 @@
             text-align: center;
             word-wrap: break-word;
             transition: all 0.3s ease;
+            cursor: pointer;
         }
         .player-circle:hover {
             transform: scale(1.1);
@@ -28,6 +30,14 @@
             opacity: 0.5;
             background-color: #ef4444 !important;
             border-color: #dc2626 !important;
+        }
+        .player-circle.nominated {
+            border: 4px solid #f59e0b !important;
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.6) !important;
+        }
+        .player-circle.voted {
+            background-color: #7c3aed !important;
+            border-color: #6d28d9 !important;
         }
         .game-map {
             position: relative;
@@ -42,7 +52,7 @@
             transform: translate(-50%, -50%);
             z-index: 5;
         }
-        .control-buttons {
+        .control-panel {
             position: absolute;
             top: 20px;
             right: 20px;
@@ -55,6 +65,18 @@
             z-index: 10;
             max-height: 400px;
             overflow-y: auto;
+        }
+        .vote-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 10;
+        }
+        .admin-panel {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10;
         }
     </style>
 </head>
@@ -95,21 +117,70 @@
         <div class="game-log">
             <div class="bg-gray-800 p-4 rounded-lg border border-gray-600 max-w-xs">
                 <h3 class="text-lg font-bold text-yellow-400 mb-2">Game Log</h3>
-                <div id="gameLogContent" class="text-sm text-gray-200 space-y-1">
+                <div id="gameLogContent" class="text-sm text-gray-200 space-y-1 max-h-80 overflow-y-auto">
                     <div>Game started</div>
+                </div>
+                <button id="clearLogBtn" class="mt-2 text-xs bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 rounded">
+                    Clear Log
+                </button>
+            </div>
+        </div>
+
+        <!-- Control Panel (Top Right) -->
+        <div class="control-panel">
+            <div class="bg-gray-800 p-4 rounded-lg border border-gray-600 space-y-3">
+                <h3 class="text-lg font-bold text-blue-400 mb-2">Host Controls</h3>
+                <button id="nextPhaseBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors">
+                    Next Phase
+                </button>
+                <button id="skipPhaseBtn" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors">
+                    Skip Phase
+                </button>
+                <button id="endGameBtn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors">
+                    End Game
+                </button>
+            </div>
+        </div>
+
+        <!-- Vote Panel (Bottom Left) -->
+        <div class="vote-panel">
+            <div id="votePanelCard" class="hidden bg-purple-800 p-4 rounded-lg border border-purple-600 max-w-sm">
+                <h3 class="text-lg font-bold text-purple-300 mb-2">Vote Management</h3>
+                <div id="voteResults" class="text-sm text-purple-100 space-y-1 mb-3">
+                    <!-- Vote results will appear here -->
+                </div>
+                <div id="voteProgress" class="text-xs text-purple-200 mb-3">
+                    <!-- Vote progress will appear here -->
+                </div>
+                <div class="space-y-2">
+                    <button id="endVotingBtn" class="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-3 rounded-lg text-sm">
+                        End Voting
+                    </button>
+                    <button id="resetVotesBtn" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 px-3 rounded-lg text-sm">
+                        Reset Votes
+                    </button>
                 </div>
             </div>
         </div>
 
-        <!-- Control Buttons (Top Right) -->
-        <div class="control-buttons">
-            <div class="flex space-x-3">
-                <button id="nextPhaseBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors">
-                    Next Phase
-                </button>
-                <button id="endGameBtn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors">
-                    End Game
-                </button>
+        <!-- Admin Panel (Bottom Right) -->
+        <div class="admin-panel">
+            <div class="bg-gray-800 p-4 rounded-lg border border-gray-600 max-w-xs">
+                <h3 class="text-lg font-bold text-red-400 mb-2">Admin Tools</h3>
+                <div class="space-y-2">
+                    <button id="killPlayerBtn" class="w-full bg-red-600 hover:bg-red-700 text-white py-2 px-3 rounded-lg text-sm">
+                        Kill Player
+                    </button>
+                    <button id="revivePlayerBtn" class="w-full bg-green-600 hover:bg-green-700 text-white py-2 px-3 rounded-lg text-sm">
+                        Revive Player
+                    </button>
+                    <button id="viewRolesBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded-lg text-sm">
+                        View All Roles
+                    </button>
+                    <button id="executePlayerBtn" class="hidden w-full bg-orange-600 hover:bg-orange-700 text-white py-2 px-3 rounded-lg text-sm">
+                        Execute Player
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -117,8 +188,11 @@
         <div class="text-center pt-8">
             <h1 class="text-4xl font-bold text-red-500 mb-2">Blood on the Clocktower</h1>
             <p class="text-gray-400 font-mono">Game Code: <span id="gameMapCode"></span></p>
-            <div id="phaseInfo" class="mt-4 text-xl text-yellow-400">
-                <span id="currentPhase">Night</span> <span id="currentDay">1</span>
+            <div id="phaseInfo" class="mt-4 text-xl">
+                <span id="currentPhase" class="text-blue-400">Night</span> <span id="currentDay" class="text-gray-300">1</span>
+            </div>
+            <div id="gameStats" class="mt-2 text-sm text-gray-500">
+                <!-- Game statistics will appear here -->
             </div>
         </div>
 
@@ -138,6 +212,66 @@
                 </div>
             </div>
         </div>
+
+        <!-- Execution Confirmation Modal -->
+        <div id="executionModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div class="bg-gray-800 p-6 rounded-lg border border-gray-600 max-w-md mx-4">
+                <h3 class="text-xl font-bold text-red-400 mb-4">Confirm Execution</h3>
+                <p id="executionText" class="text-gray-200 mb-4">Are you sure you want to execute this player?</p>
+                <div class="flex space-x-3">
+                    <button id="confirmExecutionBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg">
+                        Execute
+                    </button>
+                    <button id="cancelExecutionBtn" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Player Selection Modal -->
+        <div id="playerSelectionModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div class="bg-gray-800 p-6 rounded-lg border border-gray-600 max-w-md mx-4">
+                <h3 id="playerSelectionTitle" class="text-xl font-bold text-yellow-400 mb-4">Select a Player</h3>
+                <div id="playerSelectionList" class="space-y-2 mb-4 max-h-60 overflow-y-auto">
+                    <!-- Player selection buttons will appear here -->
+                </div>
+                <button id="cancelPlayerSelection" class="w-full bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg">
+                    Cancel
+                </button>
+            </div>
+        </div>
+
+        <!-- Role Viewer Modal -->
+        <div id="roleViewerModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div class="bg-gray-800 p-6 rounded-lg border border-gray-600 max-w-lg mx-4">
+                <h3 class="text-xl font-bold text-blue-400 mb-4">All Player Roles</h3>
+                <div id="roleViewerContent" class="space-y-2 mb-4 max-h-80 overflow-y-auto">
+                    <!-- Role information will appear here -->
+                </div>
+                <button id="closeRoleViewer" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+                    Close
+                </button>
+            </div>
+        </div>
+
+        <!-- Game End Modal -->
+        <div id="gameEndModal" class="hidden fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50">
+            <div class="bg-gray-800 p-8 rounded-lg border border-gray-600 max-w-lg mx-4">
+                <h3 id="gameEndTitle" class="text-2xl font-bold text-center mb-4"></h3>
+                <div id="gameEndContent" class="text-gray-200 mb-6">
+                    <!-- Game end content will be populated here -->
+                </div>
+                <div class="text-center">
+                    <button id="newGameBtn" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg mr-3">
+                        New Game
+                    </button>
+                    <button id="closeGameEnd" class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -145,51 +279,108 @@
         document.addEventListener('DOMContentLoaded', () => {
             const socket = io();
             
-            // Lobby elements
+            // DOM elements
             const lobbyView = document.getElementById('lobbyView');
             const gameView = document.getElementById('gameView');
             const gameCodeDisplay = document.getElementById('gameCode');
             const gameMapCode = document.getElementById('gameMapCode');
             const startGameBtn = document.getElementById('startGameBtn');
             const playerList = document.getElementById('playerList');
-            const playerListContainer = document.getElementById('playerListContainer');
-            const gameStatus = document.getElementById('gameStatus');
-            
-            // Game elements
             const playersCircle = document.getElementById('playersCircle');
             const phaseDisplay = document.getElementById('phaseDisplay');
             const currentPhase = document.getElementById('currentPhase');
             const currentDay = document.getElementById('currentDay');
             const timerDisplay = document.getElementById('timerDisplay');
             const dayCounter = document.getElementById('dayCounter');
-            const nextPhaseBtn = document.getElementById('nextPhaseBtn');
-            const endGameBtn = document.getElementById('endGameBtn');
             const gameLogContent = document.getElementById('gameLogContent');
+            const gameStats = document.getElementById('gameStats');
+            
+            // Control elements
+            const nextPhaseBtn = document.getElementById('nextPhaseBtn');
+            const skipPhaseBtn = document.getElementById('skipPhaseBtn');
+            const endGameBtn = document.getElementById('endGameBtn');
+            const clearLogBtn = document.getElementById('clearLogBtn');
+            
+            // Vote panel elements
+            const votePanelCard = document.getElementById('votePanelCard');
+            const voteResults = document.getElementById('voteResults');
+            const voteProgress = document.getElementById('voteProgress');
+            const endVotingBtn = document.getElementById('endVotingBtn');
+            const resetVotesBtn = document.getElementById('resetVotesBtn');
+            
+            // Admin panel elements
+            const killPlayerBtn = document.getElementById('killPlayerBtn');
+            const revivePlayerBtn = document.getElementById('revivePlayerBtn');
+            const viewRolesBtn = document.getElementById('viewRolesBtn');
+            const executePlayerBtn = document.getElementById('executePlayerBtn');
+            
+            // Modal elements
+            const executionModal = document.getElementById('executionModal');
+            const executionText = document.getElementById('executionText');
+            const confirmExecutionBtn = document.getElementById('confirmExecutionBtn');
+            const cancelExecutionBtn = document.getElementById('cancelExecutionBtn');
+            
+            const playerSelectionModal = document.getElementById('playerSelectionModal');
+            const playerSelectionTitle = document.getElementById('playerSelectionTitle');
+            const playerSelectionList = document.getElementById('playerSelectionList');
+            const cancelPlayerSelection = document.getElementById('cancelPlayerSelection');
+            
+            const roleViewerModal = document.getElementById('roleViewerModal');
+            const roleViewerContent = document.getElementById('roleViewerContent');
+            const closeRoleViewer = document.getElementById('closeRoleViewer');
+            
+            const gameEndModal = document.getElementById('gameEndModal');
+            const gameEndTitle = document.getElementById('gameEndTitle');
+            const gameEndContent = document.getElementById('gameEndContent');
+            const closeGameEnd = document.getElementById('closeGameEnd');
+            const newGameBtn = document.getElementById('newGameBtn');
 
             let gameCode;
             let gameStarted = false;
             let currentPlayers = [];
             let timerInterval;
             let seconds = 0;
+            let selectedPlayerForExecution = null;
+            let currentAction = null;
 
             // Generate a random 4-digit game code
             gameCode = Math.floor(1000 + Math.random() * 9000);
             gameCodeDisplay.textContent = gameCode;
             gameMapCode.textContent = gameCode;
 
-            // This tells the server to create a game with this code
             socket.emit('createGame', { gameCode: gameCode });
 
-            // Add to game log
-            function addToGameLog(message) {
+            // Utility functions
+            function addToGameLog(message, type = 'info') {
                 const logEntry = document.createElement('div');
-                logEntry.textContent = message;
-                logEntry.className = 'text-gray-200 text-sm';
+                logEntry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+                
+                switch(type) {
+                    case 'error':
+                        logEntry.className = 'text-red-400 text-sm';
+                        break;
+                    case 'success':
+                        logEntry.className = 'text-green-400 text-sm';
+                        break;
+                    case 'warning':
+                        logEntry.className = 'text-yellow-400 text-sm';
+                        break;
+                    default:
+                        logEntry.className = 'text-gray-200 text-sm';
+                }
+                
                 gameLogContent.appendChild(logEntry);
                 gameLogContent.scrollTop = gameLogContent.scrollHeight;
             }
 
-            // Timer functions
+            function updateGameStats() {
+                const alivePlayers = currentPlayers.filter(p => p.isAlive);
+                const deadPlayers = currentPlayers.filter(p => !p.isAlive);
+                const totalPlayers = currentPlayers.length;
+                
+                gameStats.textContent = `Alive: ${alivePlayers.length} | Dead: ${deadPlayers.length} | Total: ${totalPlayers}`;
+            }
+
             function startTimer() {
                 seconds = 0;
                 timerInterval = setInterval(() => {
@@ -206,56 +397,190 @@
                 }
             }
 
-            // Position players in a circle
             function positionPlayersInCircle(players) {
-                console.log('positionPlayersInCircle called with:', players);
                 playersCircle.innerHTML = '';
                 
-                if (!players || players.length === 0) {
-                    console.log('No players to position');
-                    return;
-                }
+                if (!players || players.length === 0) return;
                 
                 const centerX = 250;
                 const centerY = 250;
                 const radius = 180;
                 
                 players.forEach((player, index) => {
-                    console.log(`Positioning player ${index}: ${player.playerName}`);
                     const angle = (index / players.length) * 2 * Math.PI - Math.PI / 2;
                     const x = centerX + radius * Math.cos(angle) - 40;
                     const y = centerY + radius * Math.sin(angle) - 40;
                     
                     const playerElement = document.createElement('div');
-                    playerElement.className = `player-circle ${player.isAlive === false ? 'dead' : ''} bg-blue-600 border-2 border-blue-400 text-white`;
+                    playerElement.className = `player-circle ${player.isAlive === false ? 'dead' : ''} ${player.isNominated ? 'nominated' : ''} ${player.hasVoted ? 'voted' : ''} bg-blue-600 border-2 border-blue-400 text-white`;
                     playerElement.style.left = `${x}px`;
                     playerElement.style.top = `${y}px`;
                     playerElement.textContent = player.playerName;
                     playerElement.setAttribute('data-player-id', player.socketId);
+                    playerElement.setAttribute('data-player-name', player.playerName);
                     
                     // Add role tooltip for host
-                    playerElement.title = `${player.playerName} - ${player.role?.name || 'No role'}`;
+                    playerElement.title = `${player.playerName} - ${player.role?.name || 'No role'}${!player.isAlive ? ' (Dead)' : ''}`;
                     
-                    console.log(`Player ${player.playerName} positioned at (${x}, ${y})`);
+                    // Add click handler for admin actions
+                    playerElement.addEventListener('click', () => handlePlayerClick(player));
+                    
                     playersCircle.appendChild(playerElement);
                 });
                 
-                console.log(`Total players positioned: ${players.length}`);
+                updateGameStats();
+            }
+
+            function handlePlayerClick(player) {
+                if (currentAction === 'execute') {
+                    showExecutionModal(player);
+                } else if (currentAction === 'kill') {
+                    confirmAdminAction('kill', player);
+                } else if (currentAction === 'revive') {
+                    confirmAdminAction('revive', player);
+                }
+            }
+
+            function showPlayerSelectionModal(title, action, filter = null) {
+                playerSelectionTitle.textContent = title;
+                playerSelectionList.innerHTML = '';
+                currentAction = action;
+                
+                let playersToShow = currentPlayers;
+                if (filter) {
+                    playersToShow = currentPlayers.filter(filter);
+                }
+                
+                playersToShow.forEach(player => {
+                    const btn = document.createElement('button');
+                    btn.textContent = `${player.playerName}${!player.isAlive ? ' (Dead)' : ''}`;
+                    btn.className = `w-full text-left p-3 rounded-lg border transition-colors ${
+                        player.isAlive ? 'bg-gray-700 border-gray-600 hover:bg-gray-600' : 'bg-red-900 border-red-700 hover:bg-red-800'
+                    }`;
+                    btn.onclick = () => {
+                        playerSelectionModal.classList.add('hidden');
+                        if (action === 'execute') {
+                            showExecutionModal(player);
+                        } else {
+                            confirmAdminAction(action, player);
+                        }
+                    };
+                    playerSelectionList.appendChild(btn);
+                });
+                
+                playerSelectionModal.classList.remove('hidden');
+            }
+
+            function showExecutionModal(player) {
+                executionText.textContent = `Are you sure you want to execute ${player.playerName}?`;
+                selectedPlayerForExecution = player;
+                executionModal.classList.remove('hidden');
+            }
+
+            function confirmAdminAction(action, player) {
+                const actionName = action.charAt(0).toUpperCase() + action.slice(1);
+                
+                if (confirm(`${actionName} ${player.playerName}?`)) {
+                    socket.emit('adminCommand', {
+                        command: action === 'kill' ? 'killPlayer' : 'revivePlayer',
+                        data: { targetSocketId: player.socketId }
+                    });
+                    addToGameLog(`Admin ${action}ed ${player.playerName}`, 'warning');
+                }
+                currentAction = null;
+            }
+
+            function updateVoteDisplay(voteData) {
+                if (!voteData.voteTally || Object.keys(voteData.voteTally).length === 0) {
+                    voteResults.innerHTML = '<div class="text-purple-200">No votes cast yet</div>';
+                    voteProgress.textContent = '';
+                    return;
+                }
+                
+                voteResults.innerHTML = '';
+                Object.entries(voteData.voteTally).forEach(([playerName, votes]) => {
+                    const voteItem = document.createElement('div');
+                    voteItem.innerHTML = `<strong>${playerName}:</strong> ${votes} vote${votes !== 1 ? 's' : ''}`;
+                    voteItem.className = 'text-purple-100';
+                    voteResults.appendChild(voteItem);
+                });
+                
+                if (voteData.totalVotes !== undefined && voteData.alivePlayers !== undefined) {
+                    voteProgress.textContent = `${voteData.totalVotes}/${voteData.alivePlayers} players have voted`;
+                }
+            }
+
+            function showAllRoles() {
+                roleViewerContent.innerHTML = '';
+                
+                if (!currentPlayers.length) {
+                    roleViewerContent.innerHTML = '<div class="text-gray-400">No players in game</div>';
+                    roleViewerModal.classList.remove('hidden');
+                    return;
+                }
+                
+                // Group players by team
+                const teams = {
+                    'Townsfolk': [],
+                    'Outsider': [],
+                    'Minion': [],
+                    'Demon': []
+                };
+                
+                currentPlayers.forEach(player => {
+                    const roleName = player.role?.name || 'Unknown';
+                    let team = 'Unknown';
+                    
+                    if (roleName === 'Imp') team = 'Demon';
+                    else if (['Poisoner', 'Spy', 'Baron', 'Scarlet Woman'].includes(roleName)) team = 'Minion';
+                    else if (['Saint', 'Recluse', 'Butler'].includes(roleName)) team = 'Outsider';
+                    else team = 'Townsfolk';
+                    
+                    if (teams[team]) {
+                        teams[team].push(player);
+                    }
+                });
+                
+                Object.entries(teams).forEach(([teamName, players]) => {
+                    if (players.length > 0) {
+                        const teamHeader = document.createElement('div');
+                        teamHeader.className = 'font-bold text-lg mb-2 text-blue-300';
+                        teamHeader.textContent = teamName;
+                        roleViewerContent.appendChild(teamHeader);
+                        
+                        players.forEach(player => {
+                            const playerItem = document.createElement('div');
+                            playerItem.className = `p-2 rounded mb-1 ${player.isAlive ? 'bg-gray-700' : 'bg-red-900'}`;
+                            playerItem.innerHTML = `
+                                <div class="flex justify-between items-center">
+                                    <span class="font-semibold">${player.playerName}</span>
+                                    <span class="text-sm">${player.role?.name || 'Unknown'}</span>
+                                    ${!player.isAlive ? '<span class="text-red-400 text-xs">(Dead)</span>' : ''}
+                                </div>
+                            `;
+                            roleViewerContent.appendChild(playerItem);
+                        });
+                        
+                        const spacer = document.createElement('div');
+                        spacer.className = 'mb-3';
+                        roleViewerContent.appendChild(spacer);
+                    }
+                });
+                
+                roleViewerModal.classList.remove('hidden');
             }
 
             // Socket event handlers
             socket.on('gameCreated', (data) => {
                 if (data.success) {
-                    console.log('Game created successfully');
-                    addToGameLog(`Game created with code ${gameCode}`);
+                    addToGameLog(`Game created with code ${gameCode}`, 'success');
                 } else {
-                    console.error('Failed to create game:', data.message);
-                    gameCodeDisplay.textContent = 'Error creating game';
+                    addToGameLog('Failed to create game', 'error');
+                    gameCodeDisplay.textContent = 'Error';
                 }
             });
 
             socket.on('playerListUpdate', (players) => {
-                console.log('Host received player list update:', players);
                 currentPlayers = players;
                 
                 // Update lobby player list
@@ -288,36 +613,18 @@
             });
 
             socket.on('gameStarted', (data) => {
-                console.log('Game has started!');
-                console.log('Data received with gameStarted:', data);
-                
-                const playersToPosition = data.players || currentPlayers;
-                console.log('Players to position:', playersToPosition);
-                
-                // Switch to game view
                 lobbyView.classList.add('hidden');
                 gameView.classList.remove('hidden');
                 
-                // Position players in circle
-                if (playersToPosition && playersToPosition.length > 0) {
-                    console.log('Positioning players in circle:', playersToPosition);
-                    positionPlayersInCircle(playersToPosition);
-                    currentPlayers = playersToPosition;
-                } else {
-                    console.log('No players to position - playersToPosition is empty');
-                }
+                currentPlayers = data.players || currentPlayers;
+                positionPlayersInCircle(currentPlayers);
                 
-                // Start timer
                 startTimer();
-                
                 gameStarted = true;
-                addToGameLog(`Game started with ${playersToPosition.length} players`);
-                addToGameLog('Night 1 begins');
+                addToGameLog(`Game started with ${currentPlayers.length} players`, 'success');
             });
 
             socket.on('phaseChanged', (data) => {
-                console.log('Phase changed to:', data);
-                
                 phaseDisplay.textContent = data.phase;
                 currentPhase.textContent = data.phase;
                 currentDay.textContent = data.dayCount;
@@ -327,9 +634,11 @@
                 if (data.phase === 'Night') {
                     phaseDisplay.className = 'text-lg font-bold text-blue-400 mb-1';
                     addToGameLog(`Night ${data.dayCount} begins`);
+                    votePanelCard.classList.add('hidden');
                 } else {
                     phaseDisplay.className = 'text-lg font-bold text-orange-400 mb-1';
                     addToGameLog(`Day ${data.dayCount} begins`);
+                    votePanelCard.classList.remove('hidden');
                 }
                 
                 // Restart timer
@@ -338,62 +647,248 @@
             });
 
             socket.on('playerDied', (data) => {
-                addToGameLog(`${data.player.playerName} has died (${data.cause})`);
-                // Update the visual representation
+                addToGameLog(`${data.player.playerName} has died (${data.cause})`, 'error');
+                
+                // Update visual representation
                 const playerElement = document.querySelector(`[data-player-id="${data.player.socketId}"]`);
                 if (playerElement) {
                     playerElement.classList.add('dead');
+                    playerElement.title = `${data.player.playerName} - ${data.player.role?.name || 'Unknown'} (Dead)`;
                 }
+                
+                updateGameStats();
+            });
+
+            socket.on('playerRevived', (data) => {
+                addToGameLog(`${data.player.playerName} has been revived`, 'success');
+                
+                const playerElement = document.querySelector(`[data-player-id="${data.player.socketId}"]`);
+                if (playerElement) {
+                    playerElement.classList.remove('dead');
+                    playerElement.title = `${data.player.playerName} - ${data.player.role?.name || 'Unknown'}`;
+                }
+                
+                updateGameStats();
+            });
+
+            socket.on('playerNominated', (data) => {
+                addToGameLog(`${data.nominator} nominated ${data.nominee} for execution`, 'warning');
+                
+                const playerElement = document.querySelector(`[data-player-name="${data.nominee}"]`);
+                if (playerElement) {
+                    playerElement.classList.add('nominated');
+                }
+            });
+
+            socket.on('voteUpdate', (data) => {
+                addToGameLog(`${data.voter} voted for ${data.target}`);
+                updateVoteDisplay(data);
+                
+                const voterElement = document.querySelector(`[data-player-name="${data.voter}"]`);
+                if (voterElement) {
+                    voterElement.classList.add('voted');
+                }
+            });
+
+            socket.on('executionDecided', (data) => {
+                addToGameLog(`${data.playerName} received the most votes (${data.votes}) and will be executed`, 'warning');
+                executePlayerBtn.classList.remove('hidden');
+                selectedPlayerForExecution = currentPlayers.find(p => p.playerName === data.playerName);
+            });
+
+            socket.on('confirmExecution', (data) => {
+                showExecutionModal(currentPlayers.find(p => p.playerName === data.playerName));
+            });
+
+            socket.on('tieVote', (data) => {
+                addToGameLog(`Tie vote with ${data.votes} votes each. No execution today.`, 'info');
+                addToGameLog(`Tied players: ${data.tiedPlayers.join(', ')}`, 'info');
+            });
+
+            socket.on('noExecution', (data) => {
+                addToGameLog(data.message, 'info');
+            });
+
+            socket.on('playerExecuted', (data) => {
+                addToGameLog(`${data.player.playerName} was executed with ${data.votes} votes`, 'error');
+                executePlayerBtn.classList.add('hidden');
+            });
+
+            socket.on('votesReset', () => {
+                addToGameLog('All votes have been reset', 'info');
+                voteResults.innerHTML = '<div class="text-purple-200">No votes cast yet</div>';
+                voteProgress.textContent = '';
+                
+                // Clear visual indicators
+                document.querySelectorAll('.player-circle').forEach(el => {
+                    el.classList.remove('voted', 'nominated');
+                });
+            });
+
+            socket.on('virginTriggered', (data) => {
+                addToGameLog(`Virgin ability triggered! ${data.nominator} died for nominating the Virgin`, 'warning');
             });
 
             socket.on('gameEnded', (data) => {
-                addToGameLog(`Game ended: ${data.winCondition}`);
+                addToGameLog(`Game ended: ${data.winCondition}`, 'success');
                 stopTimer();
-                alert(`Game Over: ${data.winCondition}`);
-            });
-
-            // Control button handlers
-            nextPhaseBtn.addEventListener('click', () => {
-                socket.emit('nextPhase');
-                addToGameLog('Host triggered phase change');
-            });
-
-            endGameBtn.addEventListener('click', () => {
-                if (confirm('Are you sure you want to end the game?')) {
-                    stopTimer();
-                    lobbyView.classList.remove('hidden');
-                    gameView.classList.add('hidden');
-                    gameStarted = false;
-                    addToGameLog('Game ended by host');
+                
+                // Show game end modal
+                gameEndTitle.textContent = 'Game Over!';
+                let endContent = `<h4 class="text-xl mb-4 text-center">${data.winCondition}</h4>`;
+                endContent += '<div class="space-y-2"><h5 class="text-lg font-bold">Final Roles:</h5>';
+                
+                if (data.players) {
+                    data.players.forEach(player => {
+                        endContent += `<div class="p-2 bg-gray-700 rounded flex justify-between">
+                            <span>${player.playerName}</span>
+                            <span class="font-bold">${player.role} (${player.team})</span>
+                            ${!player.isAlive ? '<span class="text-red-400">(Dead)</span>' : ''}
+                        </div>`;
+                    });
                 }
+                
+                endContent += '</div>';
+                gameEndContent.innerHTML = endContent;
+                gameEndModal.classList.remove('hidden');
             });
 
+            // Button event handlers
             startGameBtn.addEventListener('click', () => {
                 if (!gameStarted) {
                     socket.emit('startGame', { gameCode: gameCode });
                     startGameBtn.textContent = 'Starting...';
                     startGameBtn.disabled = true;
-                    gameStarted = true;
                 }
             });
 
+            nextPhaseBtn.addEventListener('click', () => {
+                socket.emit('nextPhase');
+                addToGameLog('Host triggered phase change', 'info');
+            });
+
+            skipPhaseBtn.addEventListener('click', () => {
+                if (confirm('Are you sure you want to skip this phase?')) {
+                    socket.emit('skipDay');
+                    addToGameLog('Host skipped phase', 'warning');
+                }
+            });
+
+            endGameBtn.addEventListener('click', () => {
+                if (confirm('Are you sure you want to end the game?')) {
+                    stopTimer();
+                    location.reload(); // Simple restart
+                }
+            });
+
+            clearLogBtn.addEventListener('click', () => {
+                gameLogContent.innerHTML = '<div>Log cleared</div>';
+            });
+
+            // Vote panel handlers
+            endVotingBtn.addEventListener('click', () => {
+                socket.emit('endVoting');
+                addToGameLog('Host ended voting phase', 'info');
+            });
+
+            resetVotesBtn.addEventListener('click', () => {
+                if (confirm('Reset all votes?')) {
+                    socket.emit('resetVotes');
+                }
+            });
+
+            // Admin panel handlers
+            killPlayerBtn.addEventListener('click', () => {
+                showPlayerSelectionModal('Select Player to Kill', 'kill', p => p.isAlive);
+            });
+
+            revivePlayerBtn.addEventListener('click', () => {
+                showPlayerSelectionModal('Select Player to Revive', 'revive', p => !p.isAlive);
+            });
+
+            viewRolesBtn.addEventListener('click', () => {
+                showAllRoles();
+            });
+
+            executePlayerBtn.addEventListener('click', () => {
+                if (selectedPlayerForExecution) {
+                    showExecutionModal(selectedPlayerForExecution);
+                } else {
+                    showPlayerSelectionModal('Select Player to Execute', 'execute', p => p.isAlive);
+                }
+            });
+
+            // Modal handlers
+            confirmExecutionBtn.addEventListener('click', () => {
+                if (selectedPlayerForExecution) {
+                    socket.emit('confirmExecution', { 
+                        targetSocketId: selectedPlayerForExecution.socketId 
+                    });
+                    executionModal.classList.add('hidden');
+                    addToGameLog(`Host executed ${selectedPlayerForExecution.playerName}`, 'warning');
+                    selectedPlayerForExecution = null;
+                }
+            });
+
+            cancelExecutionBtn.addEventListener('click', () => {
+                executionModal.classList.add('hidden');
+                selectedPlayerForExecution = null;
+            });
+
+            cancelPlayerSelection.addEventListener('click', () => {
+                playerSelectionModal.classList.add('hidden');
+                currentAction = null;
+            });
+
+            closeRoleViewer.addEventListener('click', () => {
+                roleViewerModal.classList.add('hidden');
+            });
+
+            closeGameEnd.addEventListener('click', () => {
+                gameEndModal.classList.add('hidden');
+            });
+
+            newGameBtn.addEventListener('click', () => {
+                location.reload();
+            });
+
+            // Error handlers
             socket.on('startGameError', (data) => {
-                console.error('Start game error:', data.message);
+                addToGameLog(`Start game error: ${data.message}`, 'error');
                 startGameBtn.textContent = 'Error - Try Again';
                 startGameBtn.disabled = false;
                 gameStarted = false;
             });
 
             socket.on('connect', () => {
-                console.log('Connected to server as host.');
+                addToGameLog('Connected to server as host', 'success');
             });
 
             socket.on('disconnect', () => {
-                console.log('Disconnected from server.');
+                addToGameLog('Disconnected from server', 'error');
                 startGameBtn.disabled = true;
-                gameCodeDisplay.textContent = 'Disconnected';
                 gameStarted = false;
                 stopTimer();
+            });
+
+            // Close modals on escape key
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    if (!executionModal.classList.contains('hidden')) {
+                        executionModal.classList.add('hidden');
+                        selectedPlayerForExecution = null;
+                    }
+                    if (!playerSelectionModal.classList.contains('hidden')) {
+                        playerSelectionModal.classList.add('hidden');
+                        currentAction = null;
+                    }
+                    if (!roleViewerModal.classList.contains('hidden')) {
+                        roleViewerModal.classList.add('hidden');
+                    }
+                    if (!gameEndModal.classList.contains('hidden')) {
+                        gameEndModal.classList.add('hidden');
+                    }
+                }
             });
         });
     </script>

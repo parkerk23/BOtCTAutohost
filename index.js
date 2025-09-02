@@ -55,12 +55,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('fortune-teller-investigate-players', ({ target1SocketId, target2SocketId }) => {
-        const game = findGameByPlayerSocketId(socket.id);
-        if (game) {
-            game.handleFortuneTellerInvestigation(socket.id, target1SocketId, target2SocketId);
-        }
-    });
 
     socket.on('butler-watch-player', (masterSocketId) => {
         const game = findGameByPlayerSocketId(socket.id);
@@ -68,20 +62,281 @@ io.on('connection', (socket) => {
             game.handleButlerChoice(socket.id, masterSocketId);
         }
     });
+        // Enhanced index.js - Additional socket event handlers
 
-    socket.on('ravenkeeper-choose-target', (targetSocketId) => {
-        const game = findGameByPlayerSocketId(socket.id);
-        if (game && targetSocketId) {
-            const target = game.players.find(p => p.socketId === targetSocketId);
-            if (target) {
-                // Store the choice for when the Ravenkeeper dies
-                const ravenkeeper = game.players.find(p => p.socketId === socket.id);
-                ravenkeeper.ravenkeeperTarget = target;
-                console.log(`Ravenkeeper chose ${target.playerName}. If they die, Ravenkeeper learns their role.`);
-                io.to(socket.id).emit('actionConfirmed', `You will learn ${target.playerName}'s role if they die.`);
+        // Add these event handlers to your index.js socket.on('connection') block:
+
+        // Enhanced Fortune Teller with 2-player selection
+        socket.on('fortune-teller-investigate-players', ({ target1SocketId, target2SocketId }) => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game && target1SocketId && target2SocketId && target1SocketId !== target2SocketId) {
+                game.handleFortuneTellerInvestigation(socket.id, target1SocketId, target2SocketId);
             }
-        }
-    });
+        });
+
+        // Enhanced Ravenkeeper target selection
+        socket.on('ravenkeeper-choose-target', (targetSocketId) => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game && targetSocketId) {
+                game.handleRavenkeeperChoice(socket.id, targetSocketId);
+            }
+        });
+
+        // Nomination handling
+        socket.on('nominate', ({ targetSocketId }) => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game && game.gamePhase === 'Day') {
+                const success = game.handleNomination(socket.id, targetSocketId);
+                if (success) {
+                    console.log('Nomination successful');
+                }
+            }
+        });
+
+        // Enhanced voting with vote tallying
+        socket.on('vote', ({ targetSocketId }) => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game && game.gamePhase === 'Day') {
+                const success = game.handleVote(socket.id, targetSocketId);
+                if (success) {
+                    const voter = game.players.find(p => p.socketId === socket.id);
+                    const target = game.players.find(p => p.socketId === targetSocketId);
+                    
+                    // Calculate current vote totals
+                    const voteResults = game.calculateVoteResults();
+                    
+                    io.to(game.gameCode).emit('voteUpdate', {
+                        voter: voter.playerName,
+                        target: target.playerName,
+                        voteTally: voteResults.results,
+                        totalVotes: Object.values(voteResults.results).reduce((sum, count) => sum + count, 0),
+                        alivePlayers: game.players.filter(p => p.isAlive).length
+                    });
+                    
+                    console.log(`${voter.playerName} voted for ${target.playerName}`);
+                }
+            }
+        });
+
+        // Get current vote status
+        socket.on('getVoteStatus', () => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game && game.gamePhase === 'Day') {
+                const voteResults = game.calculateVoteResults();
+                const alivePlayers = game.players.filter(p => p.isAlive);
+                const playersWhoVoted = game.players.filter(p => p.hasVoted);
+                
+                socket.emit('voteStatus', {
+                    results: voteResults.results,
+                    maxVotes: voteResults.maxVotes,
+                    playersWithMaxVotes: voteResults.playersWithMaxVotes,
+                    totalVoters: playersWhoVoted.length,
+                    totalAlivePlayers: alivePlayers.length,
+                    canExecute: voteResults.maxVotes > 0
+                });
+            }
+        });
+
+        // End voting phase and determine execution
+        socket.on('endVoting', () => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game && game.hostSocketId === socket.id && game.gamePhase === 'Day') {
+                const voteResults = game.calculateVoteResults();
+                
+                if (voteResults.maxVotes > 0 && voteResults.playersWithMaxVotes.length === 1) {
+                    const playerToExecute = voteResults.playersWithMaxVotes[0];
+                    const targetPlayer = game.players.find(p => p.playerName === playerToExecute);
+                    
+                    if (targetPlayer) {
+                        io.to(game.gameCode).emit('executionDecided', {
+                            playerName: playerToExecute,
+                            votes: voteResults.maxVotes
+                        });
+                        
+                        // Host can confirm execution
+                        io.to(game.hostSocketId).emit('confirmExecution', {
+                            playerName: playerToExecute,
+                            votes: voteResults.maxVotes,
+                            socketId: targetPlayer.socketId
+                        });
+                    }
+                } else if (voteResults.playersWithMaxVotes.length > 1) {
+                    // Tie vote - no execution
+                    io.to(game.gameCode).emit('tieVote', {
+                        tiedPlayers: voteResults.playersWithMaxVotes,
+                        votes: voteResults.maxVotes
+                    });
+                } else {
+                    // No votes - no execution
+                    io.to(game.gameCode).emit('noExecution', {
+                        message: 'No votes were cast - no execution today.'
+                    });
+                }
+            }
+        });
+
+        // Confirm execution (host only)
+        socket.on('confirmExecution', ({ targetSocketId }) => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game && game.hostSocketId === socket.id && game.gamePhase === 'Day') {
+                const target = game.players.find(p => p.socketId === targetSocketId);
+                if (target && target.isAlive) {
+                    target.playerDies();
+                    game.executionOccurred = true;
+                    game.pastExecutions.push(target);
+                    
+                    // Handle death triggers
+                    game.handlePlayerDeath(target, 'execution');
+                    
+                    io.to(game.gameCode).emit('playerExecuted', { 
+                        player: target,
+                        cause: 'execution',
+                        votes: game.calculateVoteResults().results[target.playerName] || 0
+                    });
+                    
+                    console.log(`${target.playerName} was executed by vote`);
+                }
+            }
+        });
+
+        // Reset votes (host only)
+        socket.on('resetVotes', () => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game && game.hostSocketId === socket.id && game.gamePhase === 'Day') {
+                game.voteTally = {};
+                game.players.forEach(player => {
+                    player.resetVoting();
+                    player.isNominated = false;
+                });
+                
+                io.to(game.gameCode).emit('votesReset');
+                console.log('Host reset all votes');
+            }
+        });
+
+        // Skip day phase (host only)
+        socket.on('skipDay', () => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game && game.hostSocketId === socket.id && game.gamePhase === 'Day') {
+                // Check Mayor win condition if no execution occurred
+                const mayorPlayer = game.players.find(p => p.role.name === 'Mayor' && p.isAlive);
+                const alivePlayers = game.players.filter(p => p.isAlive);
+                
+                if (mayorPlayer && alivePlayers.length === 3 && !game.executionOccurred) {
+                    game.endGame('Good wins - Mayor condition met (3 players alive, no execution)');
+                    return;
+                }
+                
+                // Proceed to night
+                game.NightPhase();
+                io.to(game.gameCode).emit('phaseChanged', { 
+                    phase: 'Night', 
+                    dayCount: game.dayCount 
+                });
+                io.to(game.hostSocketId).emit('phaseChanged', { 
+                    phase: 'Night', 
+                    dayCount: game.dayCount 
+                });
+                
+                console.log('Host skipped day phase');
+            }
+        });
+
+        // Get game state (for reconnecting players)
+        socket.on('getGameState', () => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game) {
+                const player = game.players.find(p => p.socketId === socket.id);
+                const alivePlayers = game.players.filter(p => p.isAlive);
+                
+                socket.emit('gameState', {
+                    gamePhase: game.gamePhase,
+                    dayCount: game.dayCount,
+                    players: game.players.map(p => ({
+                        socketId: p.socketId,
+                        playerName: p.playerName,
+                        isAlive: p.isAlive,
+                        hasVoted: p.hasVoted,
+                        isNominated: p.isNominated
+                    })),
+                    myRole: player ? player.role : null,
+                    voteTally: game.voteTally,
+                    alivePlayers: alivePlayers.length
+                });
+            }
+        });
+
+        // Handle player reconnection
+        socket.on('reconnect', ({ playerName, gameCode }) => {
+            const game = games[gameCode];
+            if (game) {
+                const existingPlayer = game.players.find(p => p.playerName === playerName);
+                if (existingPlayer) {
+                    // Update socket ID for reconnected player
+                    const oldSocketId = existingPlayer.socketId;
+                    existingPlayer.socketId = socket.id;
+                    
+                    socket.join(gameCode);
+                    
+                    // Send current game state
+                    socket.emit('reconnected', {
+                        success: true,
+                        role: existingPlayer.role,
+                        gamePhase: game.gamePhase,
+                        dayCount: game.dayCount
+                    });
+                    
+                    // Update other players about the reconnection
+                    io.to(gameCode).emit('playerReconnected', {
+                        playerName: existingPlayer.playerName
+                    });
+                    
+                    console.log(`${playerName} reconnected to game ${gameCode}`);
+                }
+            }
+        });
+
+        // Admin commands (host only)
+        socket.on('adminCommand', ({ command, data }) => {
+            const game = findGameByPlayerSocketId(socket.id);
+            if (game && game.hostSocketId === socket.id) {
+                switch (command) {
+                    case 'killPlayer':
+                        const targetPlayer = game.players.find(p => p.socketId === data.targetSocketId);
+                        if (targetPlayer && targetPlayer.isAlive) {
+                            targetPlayer.playerDies();
+                            game.handlePlayerDeath(targetPlayer, 'admin');
+                            io.to(game.gameCode).emit('playerDied', { 
+                                player: targetPlayer, 
+                                cause: 'admin' 
+                            });
+                        }
+                        break;
+                        
+                    case 'revivePlayer':
+                        const playerToRevive = game.players.find(p => p.socketId === data.targetSocketId);
+                        if (playerToRevive && !playerToRevive.isAlive) {
+                            playerToRevive.isAlive = true;
+                            io.to(game.gameCode).emit('playerRevived', { 
+                                player: playerToRevive 
+                            });
+                        }
+                        break;
+                        
+                    case 'changePhase':
+                        if (data.phase === 'Night') {
+                            game.NightPhase();
+                        } else if (data.phase === 'Day') {
+                            game.dayPhase();
+                        }
+                        io.to(game.gameCode).emit('phaseChanged', { 
+                            phase: data.phase, 
+                            dayCount: game.dayCount 
+                        });
+                        break;
+                }
+            }
+        });
 
     // Vote handling
     socket.on('vote', ({ targetSocketId }) => {

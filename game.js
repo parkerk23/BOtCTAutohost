@@ -674,6 +674,271 @@ class Game {
         this.io.to(this.gameCode).emit('gameEnded', { winCondition });
         this.io.to(this.hostSocketId).emit('gameEnded', { winCondition });
     }
+
+    handleFortuneTellerInvestigation(fortuneTellerSocketId, target1SocketId, target2SocketId) {
+    const target1 = this.players.find(p => p.socketId === target1SocketId);
+    const target2 = this.players.find(p => p.socketId === target2SocketId);
+    
+    if (!target1 || !target2 || target1.socketId === target2.socketId) return;
+
+    // Check if either target is evil or the red herring
+    const isTarget1Evil = this.isPlayerEvil(target1) || target1.socketId === this.redHerring?.socketId;
+    const isTarget2Evil = this.isPlayerEvil(target2) || target2.socketId === this.redHerring?.socketId;
+    
+    const result = isTarget1Evil || isTarget2Evil ? "YES" : "NO";
+    
+    this.io.to(fortuneTellerSocketId).emit('fortuneTellerResult', {
+        target1: target1.playerName,
+        target2: target2.playerName,
+        result: result
+    });
+    
+    console.log(`Fortune Teller learned: ${target1.playerName} and ${target2.playerName} - ${result}`);
+}
+
+// Enhanced Ravenkeeper handling
+handleRavenkeeperChoice(ravenkeeperSocketId, targetSocketId) {
+    const ravenkeeper = this.players.find(p => p.socketId === ravenkeeperSocketId);
+    const target = this.players.find(p => p.socketId === targetSocketId);
+    
+    if (ravenkeeper && target && ravenkeeper.role.name === 'Ravenkeeper') {
+        ravenkeeper.ravenkeeperTarget = target;
+        console.log(`Ravenkeeper chose ${target.playerName}. Will learn their role if Ravenkeeper dies.`);
+        this.io.to(ravenkeeperSocketId).emit('actionConfirmed', `You will learn ${target.playerName}'s role if you die.`);
+    }
+}
+
+// Enhanced death handling with proper triggers
+handlePlayerDeath(player, cause) {
+    console.log(`${player.playerName} died from: ${cause}`);
+    
+    // Ravenkeeper ability - only triggers on night death
+    if (player.role.name === 'Ravenkeeper' && cause === 'demon' && player.ravenkeeperTarget) {
+        const target = player.ravenkeeperTarget;
+        this.io.to(player.socketId).emit('ravenkeeperInfo', {
+            targetPlayer: target.playerName,
+            role: target.role.name
+        });
+        console.log(`Ravenkeeper learns ${target.playerName} is the ${target.role.name}`);
+    }
+
+    // Mayor ability - if Mayor dies at night, another townsfolk dies instead
+    if (player.role.name === 'Mayor' && cause === 'demon') {
+        const aliveTownsfolk = this.players.filter(p => 
+            p.isAlive && 
+            Object.values(Roles.TOWNSFOLK.roles).some(r => r.name === p.role.name) &&
+            p.socketId !== player.socketId
+        );
+        
+        if (aliveTownsfolk.length > 0) {
+            const replacement = aliveTownsfolk[Math.floor(Math.random() * aliveTownsfolk.length)];
+            replacement.playerDies();
+            console.log(`Mayor died, ${replacement.playerName} dies instead.`);
+            this.io.to(this.gameCode).emit('playerDied', { 
+                player: replacement, 
+                cause: 'mayor_replacement' 
+            });
+        }
+    }
+
+    // Saint ability - if executed, evil team wins
+    if (player.role.name === 'Saint' && cause === 'execution') {
+        this.endGame('Evil wins - Saint executed');
+        return;
+    }
+
+    // Check win conditions after death
+    const winCondition = this.checkWinCondition();
+    if (winCondition) {
+        this.endGame(winCondition);
+    }
+}
+
+    // Enhanced voting system with vote counting
+    handleVote(voterSocketId, targetSocketId) {
+        const voter = this.players.find(p => p.socketId === voterSocketId);
+        const target = this.players.find(p => p.socketId === targetSocketId);
+        
+        if (!voter || !target || !voter.isAlive || !voter.canVote || voter.hasVoted) {
+            return false;
+        }
+        
+        // Butler restriction - can only vote if master has voted or master is dead
+        if (voter.role.name === 'Butler' && voter.masterSocketId) {
+            const master = this.players.find(p => p.socketId === voter.masterSocketId);
+            if (master && master.isAlive && !master.hasVoted) {
+                return false; // Butler can't vote unless master has voted
+            }
+        }
+        
+        if (!this.voteTally[targetSocketId]) {
+            this.voteTally[targetSocketId] = [];
+        }
+        
+        this.voteTally[targetSocketId].push(voterSocketId);
+        voter.hasVoted = true;
+        
+        return true;
+    }
+
+    // Vote result calculation
+    calculateVoteResults() {
+        const results = {};
+        Object.keys(this.voteTally).forEach(targetSocketId => {
+            const target = this.players.find(p => p.socketId === targetSocketId);
+            if (target) {
+                results[target.playerName] = this.voteTally[targetSocketId].length;
+            }
+        });
+        
+        // Find player(s) with most votes
+        const maxVotes = Math.max(...Object.values(results));
+        const playersWithMaxVotes = Object.keys(results).filter(name => results[name] === maxVotes);
+        
+        return {
+            results,
+            maxVotes,
+            playersWithMaxVotes
+        };
+    }
+
+    // Enhanced day phase with voting mechanics
+    dayPhase() {
+        this.gamePhase = 'Day';
+        this.executionOccurred = false;
+        this.voteTally = {};
+        
+        // Clear poison (lasts one day/night cycle)
+        this.players.forEach(player => {
+            if (player.isPoisoned && this.dayCount > 1) {
+                player.isPoisoned = false;
+            }
+            player.resetVoting();
+            player.isNominated = false;
+        });
+        
+        // Check Mayor win condition (3 players alive, no execution)
+        const mayorPlayer = this.players.find(p => p.role.name === 'Mayor' && p.isAlive);
+        const alivePlayers = this.players.filter(p => p.isAlive);
+        
+        if (mayorPlayer && alivePlayers.length === 3 && this.dayCount > 1 && !this.executionOccurred) {
+            this.endGame('Good wins - Mayor condition met (3 players alive, no execution)');
+            return;
+        }
+        
+        console.log(`Day ${this.dayCount} begins`);
+        this.io.to(this.gameCode).emit('dayPhaseStarted', {
+            dayCount: this.dayCount,
+            alivePlayers: alivePlayers.length
+        });
+    }
+
+    // Enhanced nomination handling with Virgin ability
+    handleNomination(nominatorSocketId, nomineeSocketId) {
+        const nominator = this.players.find(p => p.socketId === nominatorSocketId);
+        const nominee = this.players.find(p => p.socketId === nomineeSocketId);
+        
+        if (!nominator || !nominee || !nominator.isAlive || !nominee.isAlive) {
+            return false;
+        }
+        
+        nominee.isNominated = true;
+        
+        // Virgin ability - first nomination triggers
+        if (nominee.role.name === 'Virgin' && !nominee.virginTriggered) {
+            nominee.virginTriggered = true;
+            
+            // Check if nominator is a Townsfolk
+            const isTownsfolk = Object.values(Roles.TOWNSFOLK.roles).some(r => r.name === nominator.role.name);
+            
+            if (isTownsfolk) {
+                nominator.playerDies();
+                this.io.to(this.gameCode).emit('virginTriggered', {
+                    nominator: nominator.playerName,
+                    virgin: nominee.playerName
+                });
+                this.io.to(this.gameCode).emit('playerDied', { 
+                    player: nominator, 
+                    cause: 'virgin' 
+                });
+                console.log(`Virgin ability triggered: ${nominator.playerName} (Townsfolk) died for nominating the Virgin`);
+                
+                // Check win conditions
+                const winCondition = this.checkWinCondition();
+                if (winCondition) {
+                    this.endGame(winCondition);
+                    return true;
+                }
+            }
+        }
+        
+        this.io.to(this.gameCode).emit('playerNominated', {
+            nominator: nominator.playerName,
+            nominee: nominee.playerName
+        });
+        
+        return true;
+    }
+
+    // Enhanced win condition checking
+    checkWinCondition() {
+        const aliveEvil = this.players.filter(p => p.isAlive && this.isPlayerEvil(p));
+        const aliveGood = this.players.filter(p => p.isAlive && !this.isPlayerEvil(p));
+
+        console.log(`Win check - Evil: ${aliveEvil.length}, Good: ${aliveGood.length}`);
+
+        // Evil wins if no demon alive (shouldn't happen normally)
+        if (aliveEvil.length === 0 || !aliveEvil.some(p => p.role.name === 'Imp')) {
+            return 'Good wins - Demon eliminated';
+        }
+        
+        // Evil wins if evil players >= good players
+        if (aliveEvil.length >= aliveGood.length) {
+            return 'Evil wins - Equal or more evil than good players';
+        }
+        
+        // Special Mayor win condition is checked in dayPhase()
+        
+        return null; // Game continues
+    }
+
+    // End game with proper cleanup
+    endGame(winCondition) {
+        this.gamePhase = 'Ended';
+        console.log(`Game ended: ${winCondition}`);
+        
+        // Reveal all roles to all players
+        const finalGameState = {
+            winCondition,
+            players: this.players.map(p => ({
+                playerName: p.playerName,
+                role: p.role.name,
+                isAlive: p.isAlive,
+                team: this.getPlayerTeam(p)
+            }))
+        };
+        
+        this.io.to(this.gameCode).emit('gameEnded', finalGameState);
+        this.io.to(this.hostSocketId).emit('gameEnded', finalGameState);
+    }
+
+    // Helper to determine player team
+    getPlayerTeam(player) {
+        const roleName = player.role.name;
+        
+        if (Object.values(Roles.TOWNSFOLK.roles).some(r => r.name === roleName)) {
+            return 'Townsfolk';
+        } else if (Object.values(Roles.OUTSIDER.roles).some(r => r.name === roleName)) {
+            return 'Outsider';
+        } else if (Object.values(Roles.MINION.roles).some(r => r.name === roleName)) {
+            return 'Minion';
+        } else if (Object.values(Roles.DEMON.roles).some(r => r.name === roleName)) {
+            return 'Demon';
+        }
+        
+        return 'Unknown';
+    }
+
 }
 
 module.exports = { Game };

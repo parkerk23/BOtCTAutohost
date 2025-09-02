@@ -1,3 +1,4 @@
+<!-- Enhanced player.html with voting, nomination, and Fortune Teller improvements -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -38,6 +39,14 @@
             border: 4px solid #10b981 !important;
             box-shadow: 0 0 20px rgba(16, 185, 129, 0.6) !important;
         }
+        .player-circle.nominated {
+            border: 4px solid #f59e0b !important;
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.6) !important;
+        }
+        .player-circle.voted {
+            background-color: #7c3aed !important;
+            border-color: #6d28d9 !important;
+        }
         .game-map {
             position: relative;
             width: 500px;
@@ -62,6 +71,25 @@
             bottom: 20px;
             right: 20px;
             z-index: 10;
+        }
+        .day-actions {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+        }
+        .vote-tally {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+        }
+        .fortune-teller-selection {
+            position: fixed;
+            bottom: 50%;
+            left: 50%;
+            transform: translate(-50%, 50%);
+            z-index: 20;
         }
     </style>
 </head>
@@ -104,6 +132,37 @@
 
     <!-- Game Section -->
     <div id="gameSection" class="hidden min-h-screen relative bg-gray-900 w-full">
+        <!-- Vote Tally (Top Left) -->
+        <div class="vote-tally">
+            <div id="voteTallyCard" class="hidden bg-gray-800 p-4 rounded-lg border border-gray-600 max-w-xs">
+                <h3 class="text-lg font-bold text-purple-400 mb-2">Vote Tally</h3>
+                <div id="voteTallyContent" class="text-gray-200 text-sm space-y-1">
+                    <!-- Vote counts will appear here -->
+                </div>
+                <div id="voteProgress" class="mt-2 text-xs text-gray-400">
+                    <!-- Voting progress will appear here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Day Actions (Top Right) -->
+        <div class="day-actions">
+            <div id="dayActionsCard" class="hidden bg-orange-800 p-4 rounded-lg border border-orange-600 max-w-xs">
+                <h3 class="text-lg font-bold text-orange-300 mb-2">Day Actions</h3>
+                <div id="dayActionsContent" class="space-y-2">
+                    <button id="nominateBtn" class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                        Nominate Player
+                    </button>
+                    <button id="voteBtn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:opacity-50">
+                        Vote
+                    </button>
+                    <button id="slayerBtn" class="hidden w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                        Use Slayer Shot
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Role Info (Bottom Left) -->
         <div class="role-info">
             <div class="bg-gray-800 p-4 rounded-lg border border-gray-600 max-w-xs">
@@ -111,6 +170,7 @@
                 <div id="roleCard" class="space-y-2">
                     <h4 id="roleName" class="text-xl font-bold text-center text-yellow-400"></h4>
                     <p id="roleAbility" class="text-gray-200 text-sm"></p>
+                    <p id="roleTeam" class="text-gray-400 text-xs text-center"></p>
                 </div>
             </div>
         </div>
@@ -128,6 +188,29 @@
             </div>
         </div>
 
+        <!-- Fortune Teller Selection Modal -->
+        <div id="fortuneTellerModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div class="bg-gray-800 p-6 rounded-lg border border-gray-600 max-w-md mx-4">
+                <h3 class="text-xl font-bold text-blue-400 mb-4">Fortune Teller Investigation</h3>
+                <p class="text-gray-200 text-sm mb-4">Select 2 players to investigate:</p>
+                <div id="fortuneTellerTargets" class="space-y-2 mb-4">
+                    <!-- Target selection buttons will appear here -->
+                </div>
+                <div id="fortuneTellerSelected" class="mb-4">
+                    <p class="text-sm text-gray-400">Selected:</p>
+                    <div id="selectedTargets" class="text-blue-300 font-bold">None</div>
+                </div>
+                <div class="flex space-x-2">
+                    <button id="confirmFortuneTeller" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg disabled:opacity-50" disabled>
+                        Investigate
+                    </button>
+                    <button id="cancelFortuneTeller" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Game Title and Code -->
         <div class="text-center pt-8">
             <h1 class="text-4xl font-bold text-red-500 mb-2">Blood on the Clocktower</h1>
@@ -135,6 +218,9 @@
             <div id="phaseInfo" class="mt-4 text-xl">
                 <span id="currentPhase" class="text-blue-400">Night</span> 
                 <span id="currentDay" class="text-gray-300">1</span>
+            </div>
+            <div id="gameInstructions" class="mt-2 text-sm text-gray-500">
+                <!-- Phase-specific instructions will appear here -->
             </div>
         </div>
 
@@ -172,6 +258,21 @@
                 </button>
             </div>
         </div>
+
+        <!-- Game End Modal -->
+        <div id="gameEndModal" class="hidden fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50">
+            <div class="bg-gray-800 p-8 rounded-lg border border-gray-600 max-w-lg mx-4">
+                <h3 id="gameEndTitle" class="text-2xl font-bold text-center mb-4"></h3>
+                <div id="gameEndContent" class="text-gray-200">
+                    <!-- Game end content will be populated here -->
+                </div>
+                <div class="text-center mt-6">
+                    <button id="closeGameEnd" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -189,32 +290,60 @@
             const joinError = document.getElementById('joinError');
             const lobbyGameCode = document.getElementById('lobbyGameCode');
             const playerList = document.getElementById('playerList');
-            const waitingMessage = document.getElementById('waitingMessage');
             const gameMapCode = document.getElementById('gameMapCode');
             const roleName = document.getElementById('roleName');
             const roleAbility = document.getElementById('roleAbility');
+            const roleTeam = document.getElementById('roleTeam');
             const playersCircle = document.getElementById('playersCircle');
             const phaseDisplay = document.getElementById('phaseDisplay');
             const currentPhase = document.getElementById('currentPhase');
             const currentDay = document.getElementById('currentDay');
-            const timerDisplay = document.getElementById('timerDisplay');
-            const dayCounter = document.getElementById('dayCounter');
+            const gameInstructions = document.getElementById('gameInstructions');
             const actionFeedback = document.getElementById('actionFeedback');
             const feedbackText = document.getElementById('feedbackText');
             const actionPromptCard = document.getElementById('actionPromptCard');
             const actionDescription = document.getElementById('actionDescription');
             const actionButtons = document.getElementById('actionButtons');
+            
+            // Day action elements
+            const dayActionsCard = document.getElementById('dayActionsCard');
+            const nominateBtn = document.getElementById('nominateBtn');
+            const voteBtn = document.getElementById('voteBtn');
+            const slayerBtn = document.getElementById('slayerBtn');
+            
+            // Vote tally elements
+            const voteTallyCard = document.getElementById('voteTallyCard');
+            const voteTallyContent = document.getElementById('voteTallyContent');
+            const voteProgress = document.getElementById('voteProgress');
+            
+            // Fortune Teller elements
+            const fortuneTellerModal = document.getElementById('fortuneTellerModal');
+            const fortuneTellerTargets = document.getElementById('fortuneTellerTargets');
+            const selectedTargets = document.getElementById('selectedTargets');
+            const confirmFortuneTeller = document.getElementById('confirmFortuneTeller');
+            const cancelFortuneTeller = document.getElementById('cancelFortuneTeller');
+            
+            // Modal elements
             const infoModal = document.getElementById('infoModal');
             const infoModalTitle = document.getElementById('infoModalTitle');
             const infoModalContent = document.getElementById('infoModalContent');
             const closeInfoModal = document.getElementById('closeInfoModal');
+            const gameEndModal = document.getElementById('gameEndModal');
+            const gameEndTitle = document.getElementById('gameEndTitle');
+            const gameEndContent = document.getElementById('gameEndContent');
+            const closeGameEnd = document.getElementById('closeGameEnd');
 
             let currentPlayers = [];
             let mySocketId = socket.id;
             let selectedPlayer = null;
             let myRole = null;
             let isNightPhase = false;
+            let isDayPhase = false;
             let nightActionCompleted = false;
+            let hasVoted = false;
+            let nominationMode = false;
+            let slayerMode = false;
+            let fortuneTellerSelection = [];
 
             // Get socket ID when connected
             socket.on('connect', () => {
@@ -231,7 +360,7 @@
                 actionFeedback.classList.remove('hidden');
                 setTimeout(() => {
                     actionFeedback.classList.add('hidden');
-                }, 3000);
+                }, 4000);
             }
 
             function showError(message) {
@@ -248,6 +377,12 @@
                 infoModal.classList.remove('hidden');
             }
 
+            function showGameEndModal(title, content) {
+                gameEndTitle.textContent = title;
+                gameEndContent.innerHTML = content;
+                gameEndModal.classList.remove('hidden');
+            }
+
             function hideActionPrompt() {
                 actionPromptCard.classList.add('hidden');
             }
@@ -259,7 +394,8 @@
                 buttons.forEach(button => {
                     const btn = document.createElement('button');
                     btn.textContent = button.text;
-                    btn.className = 'w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors';
+                    btn.className = 'w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:opacity-50';
+                    btn.disabled = button.disabled || false;
                     btn.onclick = button.action;
                     actionButtons.appendChild(btn);
                 });
@@ -267,28 +403,35 @@
                 actionPromptCard.classList.remove('hidden');
             }
 
+            function updateGameInstructions() {
+                let instructions = '';
+                if (isNightPhase) {
+                    if (myRole && myRole.name !== 'Unknown') {
+                        instructions = 'Night phase - Wait for your role ability or watch others act';
+                    } else {
+                        instructions = 'Night phase - Sleep and wait for morning';
+                    }
+                } else if (isDayPhase) {
+                    instructions = 'Day phase - Discuss, nominate players, and vote for executions';
+                } else {
+                    instructions = 'Waiting for game to begin...';
+                }
+                gameInstructions.textContent = instructions;
+            }
+
             // Position players in a circle
             function positionPlayersInCircle(players) {
-                console.log('Player: positionPlayersInCircle called with:', players);
-                
-                if (!playersCircle) {
-                    console.error('playersCircle element not found!');
-                    return;
-                }
+                if (!playersCircle) return;
                 
                 playersCircle.innerHTML = '';
                 
-                if (!players || players.length === 0) {
-                    console.log('No players to position');
-                    return;
-                }
+                if (!players || players.length === 0) return;
                 
                 const centerX = 250;
                 const centerY = 250;
                 const radius = 180;
                 
                 players.forEach((player, index) => {
-                    console.log(`Player: Positioning player ${index}: ${player.playerName}`);
                     const angle = (index / players.length) * 2 * Math.PI - Math.PI / 2;
                     const x = centerX + radius * Math.cos(angle) - 40;
                     const y = centerY + radius * Math.sin(angle) - 40;
@@ -296,6 +439,8 @@
                     const playerElement = document.createElement('div');
                     const isMe = player.socketId === mySocketId;
                     const isDead = player.isAlive === false;
+                    const isNominated = player.isNominated || false;
+                    const hasVotedPlayer = player.hasVoted || false;
                     
                     let className = 'player-circle text-white';
                     if (isMe) {
@@ -306,6 +451,12 @@
                     if (isDead) {
                         className += ' dead';
                     }
+                    if (isNominated) {
+                        className += ' nominated';
+                    }
+                    if (hasVotedPlayer && isDayPhase) {
+                        className += ' voted';
+                    }
                     
                     playerElement.className = className;
                     playerElement.style.left = `${x}px`;
@@ -314,8 +465,8 @@
                     playerElement.setAttribute('data-player-id', player.socketId);
                     playerElement.setAttribute('data-player-name', player.playerName);
                     
-                    // Add click handler for night actions
-                    if (!isDead && player.socketId !== mySocketId && isNightPhase && !nightActionCompleted) {
+                    // Add click handler
+                    if (!isDead) {
                         playerElement.addEventListener('click', () => {
                             handlePlayerClick(player);
                         });
@@ -325,9 +476,9 @@
                 });
             }
 
-            // Handle player clicks during night phase
+            // Handle player clicks
             function handlePlayerClick(player) {
-                if (!isNightPhase || nightActionCompleted) return;
+                if (player.socketId === mySocketId) return;
                 
                 // Clear previous selection
                 document.querySelectorAll('.player-circle').forEach(el => {
@@ -335,15 +486,34 @@
                 });
                 
                 selectedPlayer = player;
-                
-                // Highlight selected player
                 const selectedElement = document.querySelector(`[data-player-id="${player.socketId}"]`);
                 if (selectedElement) {
                     selectedElement.classList.add('selected');
                 }
 
-                if (!myRole) return;
+                // Handle different interaction modes
+                if (nominationMode) {
+                    socket.emit('nominate', { targetSocketId: player.socketId });
+                    showFeedback(`You nominated ${player.playerName} for execution`);
+                    nominationMode = false;
+                    updateButtonStates();
+                } else if (isDayPhase && !hasVoted) {
+                    // Voting during day phase
+                    socket.emit('vote', { targetSocketId: player.socketId });
+                    hasVoted = true;
+                    updateButtonStates();
+                } else if (slayerMode && myRole.name === 'Slayer') {
+                    socket.emit('slayer-kill-player', player.socketId);
+                    showFeedback(`You used your Slayer shot on ${player.playerName}`);
+                    slayerMode = false;
+                    slayerBtn.style.display = 'none';
+                } else if (isNightPhase && !nightActionCompleted && myRole) {
+                    handleNightAction(player);
+                }
+            }
 
+            // Handle night actions
+            function handleNightAction(player) {
                 switch (myRole.name) {
                     case 'Monk':
                         socket.emit('monk-protected-player', player.socketId);
@@ -369,12 +539,108 @@
                         nightActionCompleted = true;
                         hideActionPrompt();
                         break;
-                    case 'Slayer':
-                        if (!isNightPhase) { // Slayer acts during day
-                            socket.emit('slayer-kill-player', player.socketId);
-                            showFeedback(`You used your slayer shot on ${player.playerName}`);
-                        }
+                    case 'Ravenkeeper':
+                        socket.emit('ravenkeeper-choose-target', player.socketId);
+                        showFeedback(`You will learn ${player.playerName}'s role if you die`);
+                        nightActionCompleted = true;
+                        hideActionPrompt();
                         break;
+                    case 'Fortune Teller':
+                        showFortuneTellerModal();
+                        break;
+                }
+            }
+
+            // Fortune Teller modal handling
+            function showFortuneTellerModal() {
+                const availablePlayers = currentPlayers.filter(p => 
+                    p.isAlive && p.socketId !== mySocketId
+                );
+                
+                fortuneTellerTargets.innerHTML = '';
+                availablePlayers.forEach(player => {
+                    const btn = document.createElement('button');
+                    btn.textContent = player.playerName;
+                    btn.className = 'w-full bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded-lg transition-colors';
+                    btn.onclick = () => selectFortuneTellerTarget(player);
+                    fortuneTellerTargets.appendChild(btn);
+                });
+                
+                fortuneTellerSelection = [];
+                updateFortuneTellerSelection();
+                fortuneTellerModal.classList.remove('hidden');
+            }
+
+            function selectFortuneTellerTarget(player) {
+                if (fortuneTellerSelection.includes(player)) {
+                    fortuneTellerSelection = fortuneTellerSelection.filter(p => p !== player);
+                } else if (fortuneTellerSelection.length < 2) {
+                    fortuneTellerSelection.push(player);
+                }
+                updateFortuneTellerSelection();
+            }
+
+            function updateFortuneTellerSelection() {
+                if (fortuneTellerSelection.length === 0) {
+                    selectedTargets.textContent = 'None';
+                } else {
+                    selectedTargets.textContent = fortuneTellerSelection.map(p => p.playerName).join(', ');
+                }
+                
+                confirmFortuneTeller.disabled = fortuneTellerSelection.length !== 2;
+                
+                // Update button styles
+                Array.from(fortuneTellerTargets.children).forEach(btn => {
+                    const playerName = btn.textContent;
+                    const isSelected = fortuneTellerSelection.some(p => p.playerName === playerName);
+                    btn.className = isSelected 
+                        ? 'w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors'
+                        : 'w-full bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded-lg transition-colors';
+                });
+            }
+
+            // Update button states based on game phase and player state
+            function updateButtonStates() {
+                if (isDayPhase) {
+                    dayActionsCard.classList.remove('hidden');
+                    
+                    nominateBtn.disabled = nominationMode;
+                    nominateBtn.textContent = nominationMode ? 'Click player to nominate' : 'Nominate Player';
+                    
+                    voteBtn.disabled = hasVoted;
+                    voteBtn.textContent = hasVoted ? 'Vote Cast' : 'Vote';
+                    
+                    if (myRole && myRole.name === 'Slayer' && !slayerMode) {
+                        slayerBtn.classList.remove('hidden');
+                        slayerBtn.textContent = slayerMode ? 'Click player to slay' : 'Use Slayer Shot';
+                    }
+                } else {
+                    dayActionsCard.classList.add('hidden');
+                }
+            }
+
+            // Update vote tally display
+            function updateVoteTally(voteData) {
+                if (!isDayPhase) {
+                    voteTallyCard.classList.add('hidden');
+                    return;
+                }
+                
+                voteTallyCard.classList.remove('hidden');
+                voteTallyContent.innerHTML = '';
+                
+                if (voteData.voteTally && Object.keys(voteData.voteTally).length > 0) {
+                    Object.entries(voteData.voteTally).forEach(([playerName, votes]) => {
+                        const voteItem = document.createElement('div');
+                        voteItem.innerHTML = `<strong>${playerName}:</strong> ${votes} vote${votes !== 1 ? 's' : ''}`;
+                        voteTallyContent.appendChild(voteItem);
+                    });
+                } else {
+                    voteTallyContent.innerHTML = '<div class="text-gray-400">No votes cast yet</div>';
+                }
+                
+                if (voteData.totalVotes !== undefined && voteData.alivePlayers !== undefined) {
+                    voteProgress.textContent = `${voteData.totalVotes}/${voteData.alivePlayers} players have voted`;
                 }
             }
 
@@ -392,7 +658,6 @@
             });
 
             socket.on('playerListUpdate', (players) => {
-                console.log('Player received player list update:', players);
                 currentPlayers = players;
                 
                 // Update lobby player list
@@ -409,22 +674,8 @@
                 }
                 
                 // Update game map if game has started
-                if (gameSection && !gameSection.classList.contains('hidden')) {
+                if (!gameSection.classList.contains('hidden')) {
                     positionPlayersInCircle(players);
-                }
-            });
-
-            socket.on('gameStarted', (data) => {
-                console.log('Player: Game has started!', data);
-                
-                const playersToPosition = data.players || currentPlayers;
-                currentPlayers = playersToPosition;
-                
-                // Don't switch views yet - wait for role assignment
-                gameMapCode.textContent = lobbyGameCode.textContent.split(': ')[1];
-                
-                if (playersToPosition && playersToPosition.length > 0) {
-                    currentPlayers = playersToPosition;
                 }
             });
 
@@ -432,7 +683,7 @@
                 myRole = role;
                 console.log('Your role has been assigned:', role);
                 
-                // NOW switch to game view since we have our role
+                // Switch to game view
                 lobbySection.classList.add('hidden');
                 gameSection.classList.remove('hidden');
                 
@@ -440,30 +691,43 @@
                 roleName.textContent = role.name;
                 roleAbility.textContent = role.ability;
                 
-                // Position players in circle now that we're in game view
+                // Determine team
+                let team = 'Unknown';
+                if (role.name === 'Imp') team = 'Demon';
+                else if (['Poisoner', 'Spy', 'Baron', 'Scarlet Woman'].includes(role.name)) team = 'Minion';
+                else if (['Saint', 'Recluse', 'Butler'].includes(role.name)) team = 'Outsider';
+                else team = 'Townsfolk';
+                
+                roleTeam.textContent = `Team: ${team}`;
+                
+                // Position players in circle
                 if (currentPlayers && currentPlayers.length > 0) {
-                    console.log('Player: Positioning players after role assignment');
                     positionPlayersInCircle(currentPlayers);
-                } else {
-                    console.log('Player: No players to position after role assignment');
                 }
                 
+                updateGameInstructions();
                 showFeedback(`You are the ${role.name}!`);
             });
 
+            socket.on('gameStarted', (data) => {
+                currentPlayers = data.players || currentPlayers;
+                gameMapCode.textContent = lobbyGameCode.textContent.split(': ')[1];
+            });
+
             socket.on('phaseChanged', (data) => {
-                console.log('Phase changed to:', data);
-                
                 phaseDisplay.textContent = data.phase;
                 currentPhase.textContent = data.phase;
                 currentDay.textContent = data.dayCount;
-                dayCounter.textContent = `Day ${data.dayCount}`;
                 
                 isNightPhase = data.phase === 'Night';
+                isDayPhase = data.phase === 'Day';
                 nightActionCompleted = false;
+                hasVoted = false;
+                nominationMode = false;
+                slayerMode = false;
                 
-                // Update phase styling
-                if (data.phase === 'Night') {
+                // Update styling
+                if (isNightPhase) {
                     phaseDisplay.className = 'text-lg font-bold text-blue-400 mb-1';
                     currentPhase.className = 'text-blue-400';
                 } else {
@@ -471,58 +735,77 @@
                     currentPhase.className = 'text-orange-400';
                 }
                 
+                updateGameInstructions();
+                updateButtonStates();
                 hideActionPrompt();
+                
+                if (!isDayPhase) {
+                    voteTallyCard.classList.add('hidden');
+                }
             });
 
             socket.on('nightPhaseStarted', () => {
                 isNightPhase = true;
                 nightActionCompleted = false;
-                console.log("Night phase started. You may perform your action.");
             });
 
-            // Role-specific night action prompts
-            socket.on('monkChoosePlayer', (data) => {
+            socket.on('dayPhaseStarted', (data) => {
+                isDayPhase = true;
+                hasVoted = false;
+                updateButtonStates();
+            });
+
+            // Night action prompts
+            socket.on('monkChoosePlayer', () => {
                 if (myRole.name === 'Monk') {
                     showActionPrompt('Choose a player to protect from the demon:', [{
                         text: 'Click on a player to protect them',
-                        action: () => hideActionPrompt()
+                        action: () => showFeedback('Click on a player in the circle to protect them')
                     }]);
                 }
             });
 
-            socket.on('impChooseTarget', (data) => {
+            socket.on('impChooseTarget', () => {
                 if (myRole.name === 'Imp') {
                     showActionPrompt('Choose your target for tonight:', [{
-                        text: 'Click on a player to kill them (or yourself)',
-                        action: () => hideActionPrompt()
+                        text: 'Click on a player to kill (including yourself)',
+                        action: () => showFeedback('Click on a player in the circle to target them')
                     }]);
                 }
             });
 
-            socket.on('poisonerChooseTarget', (data) => {
+            socket.on('poisonerChooseTarget', () => {
                 if (myRole.name === 'Poisoner') {
                     showActionPrompt('Choose a player to poison:', [{
                         text: 'Click on a player to poison them',
-                        action: () => hideActionPrompt()
+                        action: () => showFeedback('Click on a player in the circle to poison them')
                     }]);
                 }
             });
 
-            socket.on('butlerChoosePlayer', (data) => {
+            socket.on('butlerChoosePlayer', () => {
                 if (myRole.name === 'Butler') {
                     showActionPrompt('Choose a player to align with:', [{
                         text: 'Click on a player to align with them',
-                        action: () => hideActionPrompt()
+                        action: () => showFeedback('Click on a player in the circle to align with them')
                     }]);
                 }
             });
 
-            socket.on('fortuneTellerChoosePlayers', (data) => {
+            socket.on('fortuneTellerChoosePlayers', () => {
                 if (myRole.name === 'Fortune Teller') {
-                    // This needs special handling for 2 players
                     showActionPrompt('Choose 2 players to investigate:', [{
-                        text: 'Select first player, then second player',
-                        action: () => hideActionPrompt()
+                        text: 'Open Selection Window',
+                        action: () => showFortuneTellerModal()
+                    }]);
+                }
+            });
+
+            socket.on('ravenkeeperChooseTarget', () => {
+                if (myRole.name === 'Ravenkeeper') {
+                    showActionPrompt('Choose a player to learn about if you die:', [{
+                        text: 'Click on a player to select them',
+                        action: () => showFeedback('Click on a player in the circle to select them')
                     }]);
                 }
             });
@@ -534,22 +817,22 @@
                     • ${data.players[0]}<br>• ${data.players[1]}`);
             });
 
-            socket.on('librarianInfo', (data) => {
-                if (data.message) {
-                    showInfoModal('Librarian Information', data.message);
-                } else {
-                    showInfoModal('Librarian Information', 
-                        `One of these players is an <strong>Outsider</strong>:<br>
-                        • ${data.players[0]}<br>• ${data.players[1]}`);
-                }
-            });
-
             socket.on('investigatorInfo', (data) => {
                 if (data.message) {
                     showInfoModal('Investigator Information', data.message);
                 } else {
                     showInfoModal('Investigator Information', 
                         `One of these players is a <strong>Minion</strong>:<br>
+                        • ${data.players[0]}<br>• ${data.players[1]}`);
+                }
+            });
+
+            socket.on('librarianInfo', (data) => {
+                if (data.message) {
+                    showInfoModal('Librarian Information', data.message);
+                } else {
+                    showInfoModal('Librarian Information', 
+                        `One of these players is an <strong>Outsider</strong>:<br>
                         • ${data.players[0]}<br>• ${data.players[1]}`);
                 }
             });
@@ -582,12 +865,34 @@
                 }
             });
 
+            socket.on('spyGrimoire', (data) => {
+                if (myRole.name === 'Spy') {
+                    let grimoireContent = '<div class="space-y-2">';
+                    data.grimoire.forEach(player => {
+                        grimoireContent += `<div class="p-2 bg-gray-700 rounded">
+                            <strong>${player.playerName}</strong>: ${player.role}
+                            ${!player.isAlive ? ' (Dead)' : ''}
+                            ${player.isPoisoned ? ' (Poisoned)' : ''}
+                        </div>`;
+                    });
+                    grimoireContent += '</div>';
+                    showInfoModal('Spy - Grimoire Information', grimoireContent);
+                }
+            });
+
+            socket.on('ravenkeeperInfo', (data) => {
+                showInfoModal('Ravenkeeper Information', 
+                    `<strong>${data.targetPlayer}</strong> is the <strong>${data.role}</strong>`);
+            });
+
+            // Game events
             socket.on('actionConfirmed', (message) => {
                 showFeedback(message);
             });
 
             socket.on('playerDied', (data) => {
-                showFeedback(`${data.player.playerName} has died`, 'error');
+                showFeedback(`${data.player.playerName} has died (${data.cause})`, 'error');
+                
                 // Update visual representation
                 const playerElement = document.querySelector(`[data-player-id="${data.player.socketId}"]`);
                 if (playerElement) {
@@ -595,11 +900,80 @@
                 }
             });
 
-            socket.on('gameEnded', (data) => {
-                showInfoModal('Game Over', `<strong>${data.winCondition}</strong>`);
+            socket.on('playerNominated', (data) => {
+                showFeedback(`${data.nominator} nominated ${data.nominee} for execution`);
+                
+                // Update visual representation
+                const playerElement = document.querySelector(`[data-player-name="${data.nominee}"]`);
+                if (playerElement) {
+                    playerElement.classList.add('nominated');
+                }
             });
 
-            // UI Event handlers
+            socket.on('virginTriggered', (data) => {
+                showInfoModal('Virgin Ability Triggered!', 
+                    `<strong>${data.nominator}</strong> nominated the Virgin <strong>${data.virgin}</strong> and died immediately!`);
+            });
+
+            socket.on('voteUpdate', (data) => {
+                showFeedback(`${data.voter} voted for ${data.target}`);
+                updateVoteTally(data);
+                
+                // Update player visual state
+                const voterElement = document.querySelector(`[data-player-name="${data.voter}"]`);
+                if (voterElement) {
+                    voterElement.classList.add('voted');
+                }
+            });
+
+            socket.on('executionDecided', (data) => {
+                showInfoModal('Execution Decision', 
+                    `<strong>${data.playerName}</strong> received the most votes (${data.votes}) and will be executed.`);
+            });
+
+            socket.on('tieVote', (data) => {
+                showInfoModal('Tie Vote', 
+                    `There was a tie with ${data.votes} votes each. No execution today.<br>
+                    Tied players: ${data.tiedPlayers.join(', ')}`);
+            });
+
+            socket.on('noExecution', (data) => {
+                showInfoModal('No Execution', data.message);
+            });
+
+            socket.on('playerExecuted', (data) => {
+                showFeedback(`${data.player.playerName} was executed with ${data.votes} votes`, 'error');
+            });
+
+            socket.on('votesReset', () => {
+                showFeedback('All votes have been reset by the host');
+                hasVoted = false;
+                updateButtonStates();
+                voteTallyCard.classList.add('hidden');
+                
+                // Clear vote visual indicators
+                document.querySelectorAll('.player-circle').forEach(el => {
+                    el.classList.remove('voted', 'nominated');
+                });
+            });
+
+            socket.on('gameEnded', (data) => {
+                let endContent = `<h4 class="text-xl mb-4">${data.winCondition}</h4>`;
+                endContent += '<div class="space-y-2"><h5 class="text-lg font-bold">Final Roles:</h5>';
+                
+                data.players.forEach(player => {
+                    endContent += `<div class="p-2 bg-gray-700 rounded flex justify-between">
+                        <span>${player.playerName}</span>
+                        <span class="font-bold">${player.role} (${player.team})</span>
+                        ${!player.isAlive ? '<span class="text-red-400">(Dead)</span>' : ''}
+                    </div>`;
+                });
+                
+                endContent += '</div>';
+                showGameEndModal('Game Over!', endContent);
+            });
+
+            // Button event handlers
             joinGameBtn.addEventListener('click', () => {
                 const playerName = playerNameInput.value.trim();
                 const gameCode = gameCodeInput.value.trim();
@@ -619,11 +993,58 @@
                 joinGameBtn.disabled = true;
             });
 
+            nominateBtn.addEventListener('click', () => {
+                if (!nominationMode) {
+                    nominationMode = true;
+                    updateButtonStates();
+                    showFeedback('Click on a player to nominate them for execution');
+                }
+            });
+
+            voteBtn.addEventListener('click', () => {
+                if (!hasVoted) {
+                    showFeedback('Click on a player to vote for them');
+                }
+            });
+
+            slayerBtn.addEventListener('click', () => {
+                if (myRole.name === 'Slayer') {
+                    slayerMode = true;
+                    showFeedback('Click on a player to use your Slayer shot on them');
+                    updateButtonStates();
+                }
+            });
+
+            // Fortune Teller modal handlers
+            confirmFortuneTeller.addEventListener('click', () => {
+                if (fortuneTellerSelection.length === 2) {
+                    socket.emit('fortune-teller-investigate-players', {
+                        target1SocketId: fortuneTellerSelection[0].socketId,
+                        target2SocketId: fortuneTellerSelection[1].socketId
+                    });
+                    fortuneTellerModal.classList.add('hidden');
+                    nightActionCompleted = true;
+                    hideActionPrompt();
+                    showFeedback(`You investigated ${fortuneTellerSelection[0].playerName} and ${fortuneTellerSelection[1].playerName}`);
+                }
+            });
+
+            cancelFortuneTeller.addEventListener('click', () => {
+                fortuneTellerModal.classList.add('hidden');
+                fortuneTellerSelection = [];
+            });
+
+            // Modal close handlers
             closeInfoModal.addEventListener('click', () => {
                 infoModal.classList.add('hidden');
             });
 
-            // Allow Enter key navigation
+            closeGameEnd.addEventListener('click', () => {
+                gameEndModal.classList.add('hidden');
+                // Could redirect back to lobby or refresh page
+            });
+
+            // Keyboard handlers
             playerNameInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
                     gameCodeInput.focus();
@@ -638,6 +1059,22 @@
 
             gameCodeInput.addEventListener('input', (e) => {
                 e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0, 4);
+            });
+
+            // Close modals on escape key
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    if (!infoModal.classList.contains('hidden')) {
+                        infoModal.classList.add('hidden');
+                    }
+                    if (!fortuneTellerModal.classList.contains('hidden')) {
+                        fortuneTellerModal.classList.add('hidden');
+                        fortuneTellerSelection = [];
+                    }
+                    if (!gameEndModal.classList.contains('hidden')) {
+                        gameEndModal.classList.add('hidden');
+                    }
+                }
             });
 
             socket.on('disconnect', () => {
